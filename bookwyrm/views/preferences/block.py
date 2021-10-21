@@ -14,7 +14,7 @@ class Block(View):
     """blocking users"""
 
     def get(self, request):
-        """list of blocked users?"""
+        """list of blocked users"""
         return TemplateResponse(request, "preferences/blocks.html")
 
     def post(self, request, user_id):
@@ -23,6 +23,10 @@ class Block(View):
         models.UserBlocks.objects.create(
             user_subject=request.user, user_object=to_block
         )
+        # remove the blocked users's lists from the groups
+        models.List.remove_from_group(request.user, to_block)
+        # remove the blocked user from all blocker's owned groups
+        models.GroupMember.remove(request.user, to_block)
         return redirect("prefs-block")
 
 

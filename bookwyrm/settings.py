@@ -12,13 +12,14 @@ INTERNAL_IPS = [
 ]
 
 env = Env()
+env.read_env()
 DOMAIN = env("DOMAIN")
-VERSION = "0.0.1"
+VERSION = "0.1.0"
 
 PAGE_LENGTH = env("PAGE_LENGTH", 15)
 DEFAULT_LANGUAGE = env("DEFAULT_LANGUAGE", "English")
 
-JS_CACHE = "e2bc0653"
+JS_CACHE = "3eb4edb1"
 
 # email
 EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
@@ -35,6 +36,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCALE_PATHS = [
     os.path.join(BASE_DIR, "locale"),
 ]
+LANGUAGE_COOKIE_NAME = env.str("LANGUAGE_COOKIE_NAME", "django_language")
 
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
@@ -168,11 +170,12 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = "en-us"
 LANGUAGES = [
     ("en-us", _("English")),
-    ("de-de", _("German")),
-    ("es", _("Spanish")),
-    ("fr-fr", _("French")),
-    ("zh-hans", _("Simplified Chinese")),
-    ("zh-hant", _("Traditional Chinese")),
+    ("de-de", _("Deutsch (German)")),
+    ("es-es", _("Español (Spanish)")),
+    ("fr-fr", _("Français (French)")),
+    ("pt-br", _("Português - Brasil (Brazilian Portuguese)")),
+    ("zh-hans", _("简体中文 (Simplified Chinese)")),
+    ("zh-hant", _("繁體中文 (Traditional Chinese)")),
 ]
 
 
@@ -225,12 +228,13 @@ if USE_S3:
     AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
     # S3 Static settings
     STATIC_LOCATION = "static"
-    STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/{STATIC_LOCATION}/"
+    STATIC_URL = f"{PROTOCOL}://{AWS_S3_CUSTOM_DOMAIN}/{STATIC_LOCATION}/"
     STATICFILES_STORAGE = "bookwyrm.storage_backends.StaticStorage"
     # S3 Media settings
     MEDIA_LOCATION = "images"
-    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/{MEDIA_LOCATION}/"
+    MEDIA_URL = f"{PROTOCOL}://{AWS_S3_CUSTOM_DOMAIN}/{MEDIA_LOCATION}/"
     MEDIA_FULL_URL = MEDIA_URL
+    STATIC_FULL_URL = STATIC_URL
     DEFAULT_FILE_STORAGE = "bookwyrm.storage_backends.ImagesStorage"
     # I don't know if it's used, but the site crashes without it
     STATIC_ROOT = os.path.join(BASE_DIR, env("STATIC_ROOT", "static"))
@@ -240,4 +244,5 @@ else:
     STATIC_ROOT = os.path.join(BASE_DIR, env("STATIC_ROOT", "static"))
     MEDIA_URL = "/images/"
     MEDIA_FULL_URL = f"{PROTOCOL}://{DOMAIN}{MEDIA_URL}"
+    STATIC_FULL_URL = f"{PROTOCOL}://{DOMAIN}{STATIC_URL}"
     MEDIA_ROOT = os.path.join(BASE_DIR, env("MEDIA_ROOT", "images"))

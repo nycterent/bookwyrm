@@ -254,6 +254,33 @@ urlpatterns = [
         name="user-following",
     ),
     re_path(r"^hide-suggestions/?$", views.hide_suggestions, name="hide-suggestions"),
+    # groups
+    re_path(rf"{USER_PATH}/groups/?$", views.UserGroups.as_view(), name="user-groups"),
+    re_path(
+        r"^group/(?P<group_id>\d+)(.json)?/?$", views.Group.as_view(), name="group"
+    ),
+    re_path(
+        r"^group/delete/(?P<group_id>\d+)/?$", views.delete_group, name="delete-group"
+    ),
+    re_path(
+        r"^group/(?P<group_id>\d+)/add-users/?$",
+        views.FindUsers.as_view(),
+        name="group-find-users",
+    ),
+    re_path(r"^add-group-member/?$", views.invite_member, name="invite-group-member"),
+    re_path(
+        r"^remove-group-member/?$", views.remove_member, name="remove-group-member"
+    ),
+    re_path(
+        r"^accept-group-invitation/?$",
+        views.accept_membership,
+        name="accept-group-invitation",
+    ),
+    re_path(
+        r"^reject-group-invitation/?$",
+        views.reject_membership,
+        name="reject-group-invitation",
+    ),
     # lists
     re_path(rf"{USER_PATH}/lists/?$", views.UserLists.as_view(), name="user-lists"),
     re_path(r"^list/?$", views.Lists.as_view(), name="lists"),
@@ -317,6 +344,9 @@ urlpatterns = [
         rf"{STATUS_PATH}/replies(.json)?/?$", views.Replies.as_view(), name="replies"
     ),
     re_path(
+        r"^edit/(?P<status_id>\d+)/?$", views.EditStatus.as_view(), name="edit-status"
+    ),
+    re_path(
         r"^post/?$",
         views.CreateStatus.as_view(),
         name="create-status",
@@ -327,14 +357,14 @@ urlpatterns = [
         name="create-status",
     ),
     re_path(
+        r"^post/(?P<status_type>\w+)/(?P<existing_status_id>\d+)/?$",
+        views.CreateStatus.as_view(),
+        name="create-status",
+    ),
+    re_path(
         r"^delete-status/(?P<status_id>\d+)/?$",
         views.DeleteStatus.as_view(),
         name="delete-status",
-    ),
-    re_path(
-        r"^redraft-status/(?P<status_id>\d+)/?$",
-        views.DeleteAndRedraft.as_view(),
-        name="redraft",
     ),
     # interact
     re_path(r"^favorite/(?P<status_id>\d+)/?$", views.Favorite.as_view(), name="fav"),

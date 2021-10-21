@@ -4,6 +4,7 @@ from Crypto import Random
 
 from django.core.exceptions import PermissionDenied
 from django.db import models
+from django.db.models import Q
 from django.dispatch import receiver
 from django.http import Http404
 from django.utils.translation import gettext_lazy as _
@@ -66,19 +67,35 @@ class BookWyrmModel(models.Model):
             return
 
         # you can see the followers only posts of people you follow
-        if (
-            self.privacy == "followers"
-            and self.user.followers.filter(id=viewer.id).first()
+        if self.privacy == "followers" and (
+            self.user.followers.filter(id=viewer.id).first()
         ):
             return
 
         # you can see dms you are tagged in
         if hasattr(self, "mention_users"):
             if (
-                self.privacy == "direct"
+                self.privacy in ["direct", "followers"]
                 and self.mention_users.filter(id=viewer.id).first()
             ):
+
                 return
+
+        # you can see groups of which you are a member
+        if (
+            hasattr(self, "memberships")
+            and self.memberships.filter(user=viewer).exists()
+        ):
+            return
+
+        # you can see objects which have a group of which you are a member
+        if hasattr(self, "group"):
+            if (
+                hasattr(self.group, "memberships")
+                and self.group.memberships.filter(user=viewer).exists()
+            ):
+                return
+
         raise Http404()
 
     def raise_not_editable(self, viewer):
@@ -104,6 +121,52 @@ class BookWyrmModel(models.Model):
             return
 
         raise PermissionDenied()
+
+    @classmethod
+    def privacy_filter(cls, viewer, privacy_levels=None):
+        """filter objects that have "user" and "privacy" fields"""
+        queryset = cls.objects
+        if hasattr(queryset, "select_subclasses"):
+            queryset = queryset.select_subclasses()
+
+        privacy_levels = privacy_levels or ["public", "unlisted", "followers", "direct"]
+        # you can't see followers only or direct messages if you're not logged in
+        if viewer.is_anonymous:
+            privacy_levels = [
+                p for p in privacy_levels if not p in ["followers", "direct"]
+            ]
+        else:
+            # exclude blocks from both directions
+            queryset = queryset.exclude(
+                Q(user__blocked_by=viewer) | Q(user__blocks=viewer)
+            )
+
+        # filter to only provided privacy levels
+        queryset = queryset.filter(privacy__in=privacy_levels)
+
+        if "followers" in privacy_levels:
+            queryset = cls.followers_filter(queryset, viewer)
+
+        # exclude direct messages not intended for the user
+        if "direct" in privacy_levels:
+            queryset = cls.direct_filter(queryset, viewer)
+
+        return queryset
+
+    @classmethod
+    def followers_filter(cls, queryset, viewer):
+        """Override-able filter for "followers" privacy level"""
+        return queryset.exclude(
+            ~Q(  # user isn't following and it isn't their own status
+                Q(user__followers=viewer) | Q(user=viewer)
+            ),
+            privacy="followers",  # and the status is followers only
+        )
+
+    @classmethod
+    def direct_filter(cls, queryset, viewer):
+        """Override-able filter for "direct" privacy level"""
+        return queryset.exclude(~Q(user=viewer), privacy="direct")
 
 
 @receiver(models.signals.post_save)

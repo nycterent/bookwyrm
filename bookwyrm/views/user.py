@@ -12,7 +12,6 @@ from bookwyrm import models
 from bookwyrm.activitypub import ActivitypubResponse
 from bookwyrm.settings import PAGE_LENGTH
 from .helpers import get_user_from_username, is_api_request
-from .helpers import privacy_filter
 
 
 # pylint: disable=no-self-use
@@ -56,10 +55,10 @@ class User(View):
 
         # user's posts
         activities = (
-            privacy_filter(
+            models.Status.privacy_filter(
                 request.user,
-                user.status_set.select_subclasses(),
             )
+            .filter(user=user)
             .select_related(
                 "user",
                 "reply_parent",
@@ -136,6 +135,25 @@ class Following(View):
             "follow_list": paginated.get_page(request.GET.get("page")),
         }
         return TemplateResponse(request, "user/relationships/following.html", data)
+
+
+class Groups(View):
+    """list of user's groups view"""
+
+    def get(self, request, username):
+        """list of groups"""
+        user = get_user_from_username(request.user, username)
+
+        paginated = Paginator(
+            models.Group.memberships.filter(user=user).order_by("-created_date"),
+            PAGE_LENGTH,
+        )
+        data = {
+            "user": user,
+            "is_self": request.user.id == user.id,
+            "group_list": paginated.get_page(request.GET.get("page")),
+        }
+        return TemplateResponse(request, "user/groups.html", data)
 
 
 @require_POST

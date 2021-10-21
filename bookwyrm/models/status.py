@@ -6,6 +6,7 @@ from django.apps import apps
 from django.core.exceptions import PermissionDenied
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
 from django.dispatch import receiver
 from django.template.loader import get_template
 from django.utils import timezone
@@ -30,6 +31,7 @@ class Status(OrderedCollectionPageMixin, BookWyrmModel):
         "User", on_delete=models.PROTECT, activitypub_field="attributedTo"
     )
     content = fields.HtmlField(blank=True, null=True)
+    raw_content = models.TextField(blank=True, null=True)
     mention_users = fields.TagField("User", related_name="mention_user")
     mention_books = fields.TagField("Edition", related_name="mention_book")
     local = models.BooleanField(default=True)
@@ -41,6 +43,9 @@ class Status(OrderedCollectionPageMixin, BookWyrmModel):
     # created date is different than publish date because of federated posts
     published_date = fields.DateTimeField(
         default=timezone.now, activitypub_field="published"
+    )
+    edited_date = fields.DateTimeField(
+        blank=True, null=True, activitypub_field="updated"
     )
     deleted = models.BooleanField(default=False)
     deleted_date = models.DateTimeField(blank=True, null=True)
@@ -57,6 +62,7 @@ class Status(OrderedCollectionPageMixin, BookWyrmModel):
         on_delete=models.PROTECT,
         activitypub_field="inReplyTo",
     )
+    thread_id = models.IntegerField(blank=True, null=True)
     objects = InheritanceManager()
 
     activity_serializer = activitypub.Note
@@ -67,6 +73,17 @@ class Status(OrderedCollectionPageMixin, BookWyrmModel):
         """default sorting"""
 
         ordering = ("-published_date",)
+
+    def save(self, *args, **kwargs):
+        """save and notify"""
+        if self.reply_parent:
+            self.thread_id = self.reply_parent.thread_id or self.reply_parent.id
+
+        super().save(*args, **kwargs)
+
+        if not self.reply_parent:
+            self.thread_id = self.id
+        super().save(broadcast=False, update_fields=["thread_id"])
 
     def delete(self, *args, **kwargs):  # pylint: disable=unused-argument
         """ "delete" a status"""
@@ -195,6 +212,28 @@ class Status(OrderedCollectionPageMixin, BookWyrmModel):
         if isinstance(self, (GeneratedNote, ReviewRating)):
             raise PermissionDenied()
 
+    @classmethod
+    def privacy_filter(cls, viewer, privacy_levels=None):
+        queryset = super().privacy_filter(viewer, privacy_levels=privacy_levels)
+        return queryset.filter(deleted=False)
+
+    @classmethod
+    def direct_filter(cls, queryset, viewer):
+        """Overridden filter for "direct" privacy level"""
+        return queryset.exclude(
+            ~Q(Q(user=viewer) | Q(mention_users=viewer)), privacy="direct"
+        )
+
+    @classmethod
+    def followers_filter(cls, queryset, viewer):
+        """Override-able filter for "followers" privacy level"""
+        return queryset.exclude(
+            ~Q(  # not yourself, a follower, or someone who is tagged
+                Q(user__followers=viewer) | Q(user=viewer) | Q(mention_users=viewer)
+            ),
+            privacy="followers",  # and the status is followers only
+        )
+
 
 class GeneratedNote(Status):
     """these are app-generated messages about user activity"""
@@ -267,6 +306,7 @@ class Quotation(BookStatus):
     """like a review but without a rating and transient"""
 
     quote = fields.HtmlField()
+    raw_quote = models.TextField(blank=True, null=True)
     position = models.IntegerField(
         validators=[MinValueValidator(0)], null=True, blank=True
     )

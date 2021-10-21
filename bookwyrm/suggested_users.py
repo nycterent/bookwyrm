@@ -81,7 +81,7 @@ class SuggestedUsers(RedisStore):
         """take a user out of someone's suggestions"""
         self.bulk_remove_objects_from_store([suggested_user], self.store_id(user))
 
-    def get_suggestions(self, user):
+    def get_suggestions(self, user, local=False):
         """get suggestions"""
         values = self.get_store(self.store_id(user), withscores=True)
         results = []
@@ -97,8 +97,8 @@ class SuggestedUsers(RedisStore):
                 logger.exception(err)
                 continue
             user.mutuals = counts["mutuals"]
-            # user.shared_books = counts["shared_books"]
-            results.append(user)
+            if (local and user.local) or not local:
+                results.append(user)
             if len(results) >= 5:
                 break
         return results
@@ -146,6 +146,17 @@ def update_suggestions_on_follow(sender, instance, created, *args, **kwargs):
     if instance.user_subject.local:
         remove_suggestion_task.delay(instance.user_subject.id, instance.user_object.id)
     rerank_user_task.delay(instance.user_object.id, update_only=False)
+
+
+@receiver(signals.post_save, sender=models.UserFollowRequest)
+# pylint: disable=unused-argument
+def update_suggestions_on_follow_request(sender, instance, created, *args, **kwargs):
+    """remove a follow from the recs and update the ranks"""
+    if not created or not instance.user_object.discoverable:
+        return
+
+    if instance.user_subject.local:
+        remove_suggestion_task.delay(instance.user_subject.id, instance.user_object.id)
 
 
 @receiver(signals.post_save, sender=models.UserBlocks)
