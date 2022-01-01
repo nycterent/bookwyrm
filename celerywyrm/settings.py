@@ -24,3 +24,13 @@ INSTALLED_APPS = INSTALLED_APPS + [
 ROOT_URLCONF = "celerywyrm.urls"
 
 WSGI_APPLICATION = "celerywyrm.wsgi.application"
+
+USE_SENTRY = env.bool("USE_SENTRY", False)
+if USE_SENTRY:
+   import sentry_sdk
+   from sentry_sdk.integrations.celery import CeleryIntegration
+
+   sentry_sdk.init(
+    dsn=env("SENTRY_DSN"),
+    integrations=[CeleryIntegration()]
+   )

@@ -233,3 +233,17 @@ else:
     MEDIA_FULL_URL = f"{PROTOCOL}://{DOMAIN}{MEDIA_URL}"
     STATIC_FULL_URL = f"{PROTOCOL}://{DOMAIN}{STATIC_URL}"
     MEDIA_ROOT = os.path.join(BASE_DIR, env("MEDIA_ROOT", "images"))
+
+
+USE_SENTRY = env.bool("USE_SENTRY", False)
+if USE_SENTRY:
+
+   import sentry_sdk
+   from sentry_sdk.integrations.django import DjangoIntegration
+
+   sentry_sdk.init(
+    dsn=env("SENTRY_DSN"),
+    integrations=[DjangoIntegration()],
+    traces_sample_rate=env("SENTRY_TRACES_SAMPLE_RATE"),
+    send_default_pii=False
+   )
