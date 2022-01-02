@@ -28,9 +28,11 @@ WSGI_APPLICATION = "celerywyrm.wsgi.application"
 USE_SENTRY = env.bool("USE_SENTRY", False)
 if USE_SENTRY:
    import sentry_sdk
-   from sentry_sdk.integrations.celery import CeleryIntegration
+   from sentry_sdk.integrations.celery import CeleryIntegration 
+   from sentry_sdk.integrations.redis import RedisIntegration
 
    sentry_sdk.init(
     dsn=env("SENTRY_DSN"),
-    integrations=[CeleryIntegration()]
+    traces_sample_rate=env("SENTRY_TRACES_SAMPLE_RATE"),
+    integrations=[CeleryIntegration(), RedisIntegration()]
    )
