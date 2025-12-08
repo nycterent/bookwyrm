@@ -1,14 +1,13 @@
 """ background tasks """
-import os
-from celery import Celery
 
-from celerywyrm import settings
+# For backward compatibility, provide app as a lazy property
+class AppProxy:
+    def __getattr__(self, name):
+        # Lazy import to avoid circular imports
+        from bookwyrm.celery_app import app as _app
+        return getattr(_app, name)
 
-# set the default Django settings module for the 'celery' program.
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "celerywyrm.settings")
-app = Celery(
-    "tasks", broker=settings.CELERY_BROKER_URL, backend=settings.CELERY_RESULT_BACKEND
-)
+app = AppProxy()
 
 # priorities - for backwards compatibility, will be removed next release
 LOW = "low_priority"
