@@ -402,6 +402,85 @@ def is_target_hour_for_user(user, target_hour=6):
     return now_user_tz.hour == target_hour
 
 
+def generate_newsletter_html(user, activities, date_str):
+    """
+    Generate newsletter HTML for a user with given activities.
+    
+    This function provides backward compatibility for any external code
+    that expects this function name. It uses the existing email template
+    system to generate the newsletter HTML.
+    
+    Args:
+        user: User object to generate newsletter for
+        activities: Dict containing user activities 
+        date_str: Date string to display in the newsletter
+        
+    Returns:
+        Tuple of (subject, html_content, text_content)
+    """
+    data = email_data()
+    data["user"] = user.display_name
+    data["date_str"] = date_str
+    base_url = data.get("base_url", "")
+
+    # Split into own vs followed activities
+    own_reviews = [a for a in activities["reviews"] if a.user_id == user.id]
+    own_comments = [a for a in activities["comments"] if a.user_id == user.id]
+    own_quotations = [a for a in activities["quotations"] if a.user_id == user.id]
+    own_shelf_changes = [a for a in activities["shelf_changes"] if a.user_id == user.id]
+
+    followed_reviews = [a for a in activities["reviews"] if a.user_id != user.id]
+    followed_comments = [a for a in activities["comments"] if a.user_id != user.id]
+    followed_quotations = [a for a in activities["quotations"] if a.user_id != user.id]
+    followed_shelf_changes = [
+        a for a in activities["shelf_changes"] if a.user_id != user.id
+    ]
+
+    # Own activities with embedded images (flat list)
+    data["own_activities"] = {
+        "reviews": [
+            prepare_activity_with_images(a, base_url) for a in own_reviews[:3]
+        ],
+        "comments": [
+            prepare_activity_with_images(a, base_url) for a in own_comments[:3]
+        ],
+        "quotations": [
+            prepare_activity_with_images(a, base_url) for a in own_quotations[:3]
+        ],
+        "shelf_changes": [
+            prepare_activity_with_images(a, base_url) for a in own_shelf_changes[:3]
+        ],
+    }
+
+    # Followed activities grouped by user with embedded images
+    data["followed_activities"] = {
+        "reviews": prepare_grouped_activities_with_images(
+            group_activities_by_user(followed_reviews, max_per_user=3), base_url
+        ),
+        "comments": prepare_grouped_activities_with_images(
+            group_activities_by_user(followed_comments, max_per_user=3), base_url
+        ),
+        "quotations": prepare_grouped_activities_with_images(
+            group_activities_by_user(followed_quotations, max_per_user=3), base_url
+        ),
+        "shelf_changes": prepare_grouped_activities_with_images(
+            group_activities_by_user(followed_shelf_changes, max_per_user=3), base_url
+        ),
+    }
+
+    # Currently reading books with covers
+    currently_reading = get_currently_reading(user)
+    data["currently_reading"] = [
+        {
+            "readthrough": rt,
+            "book_cover": get_book_cover_base64(rt.book, base_url),
+        }
+        for rt in currently_reading
+    ]
+
+    return format_email("daily_newsletter", data)
+
+
 @app.task(queue=EMAIL)
 def send_daily_newsletter():
     """
