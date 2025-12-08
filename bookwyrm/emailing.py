@@ -64,14 +64,33 @@ def moderation_report_email(report):
         send_email.delay(admin.email, *format_email("moderation_report", data))
 
 
-def format_email(email_name, data):
+def format_email(email_name, data, _deprecated_recipient=None):
     """render the email templates"""
-    subject = get_template(f"email/{email_name}/subject.html").render(data).strip()
+    # Handle legacy call pattern where recipient was passed as first argument
+    if _deprecated_recipient is not None:
+        # This handles the case where someone called: format_email(recipient, email_name, data)
+        # In this case: email_name=recipient, data=actual_email_name, _deprecated_recipient=actual_data
+        import warnings
+        warnings.warn(
+            "format_email() was called with 3 arguments. "
+            "The first argument (recipient) is deprecated and ignored. "
+            "Use format_email(email_name, data) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        # Correct the arguments: data is the actual email_name, _deprecated_recipient is the actual data
+        actual_email_name = data
+        actual_data = _deprecated_recipient
+    else:
+        actual_email_name = email_name
+        actual_data = data
+    
+    subject = get_template(f"email/{actual_email_name}/subject.html").render(actual_data).strip()
     html_content = (
-        get_template(f"email/{email_name}/html_content.html").render(data).strip()
+        get_template(f"email/{actual_email_name}/html_content.html").render(actual_data).strip()
     )
     text_content = (
-        get_template(f"email/{email_name}/text_content.html").render(data).strip()
+        get_template(f"email/{actual_email_name}/text_content.html").render(actual_data).strip()
     )
     return (subject, html_content, text_content)
 
