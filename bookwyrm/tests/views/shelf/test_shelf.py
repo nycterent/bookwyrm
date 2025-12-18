@@ -266,3 +266,45 @@ class ShelfViews(TestCase):
         validate_html(result.render())
         self.assertEqual(result.status_code, 200)
         self.assertEqual(len(result.context_data["books"].object_list), 0)
+
+    def test_shelf_page_remote_user(self, *_):
+        """viewing a remote user's shelf should render with local URLs"""
+        with patch("bookwyrm.models.user.set_remote_server"):
+            remote_user = models.User.objects.create_user(
+                "nutria",
+                "",
+                "nutriaword",
+                local=False,
+                remote_id="https://example.com/users/nutria",
+                inbox="https://example.com/users/nutria/inbox",
+                outbox="https://example.com/users/nutria/outbox",
+            )
+        # Create a shelf for the remote user (remote users don't get default shelves)
+        with patch("bookwyrm.models.activitypub_mixin.broadcast_task.apply_async"):
+            remote_shelf = models.Shelf.objects.create(
+                name="To Read",
+                identifier="to-read",
+                user=remote_user,
+            )
+        models.ShelfBook.objects.create(
+            book=self.book,
+            user=remote_user,
+            shelf=remote_shelf,
+        )
+
+        view = views.Shelf.as_view()
+        request = self.factory.get("")
+        request.user = self.local_user
+        with patch("bookwyrm.views.shelf.shelf.is_api_request") as is_api:
+            is_api.return_value = False
+            result = view(request, "nutria@example.com", remote_shelf.identifier)
+
+        self.assertIsInstance(result, TemplateResponse)
+        # Render the template to verify it doesn't error on URL generation
+        # (Skip validate_html due to pre-existing duplicate id issue in edit shelf form)
+        result.render()
+        self.assertEqual(result.status_code, 200)
+
+        # Verify shelves in context have identifiers for local URL generation
+        for shelf in result.context_data["shelves"]:
+            self.assertIsNotNone(shelf.identifier)
