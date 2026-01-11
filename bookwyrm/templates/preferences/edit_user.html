@@ -88,15 +88,6 @@
                 </label>
             </div>
             <div class="field">
-                <label class="checkbox label" for="id_filter_suggestions_by_language">
-                    {{ form.filter_suggestions_by_language }}
-                    {% trans "Only suggest users who post in my preferred language" %}
-                </label>
-                <p class="help">
-                    {% trans "Requires selecting a preferred language above. Users without a preferred language set will still be shown (common for remote users)." %}
-                </p>
-            </div>
-            <div class="field">
                 <label class="checkbox label" for="id_newsletter_subscription">
                     {{ form.newsletter_subscription }}
                     {% trans "Receive daily newsletter digest" %}

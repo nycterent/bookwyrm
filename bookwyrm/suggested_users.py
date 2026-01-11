@@ -144,15 +144,6 @@ class SuggestedUsers(RedisStore):
                 ),
             ).exclude(book_count=0, status_count=0)
 
-        # Filter by language if preference is enabled and user has a preferred language
-        # Include users with matching language OR no language set (common for remote users)
-        if user.filter_suggestions_by_language and user.preferred_language:
-            users = users.filter(
-                Q(preferred_language=user.preferred_language)
-                | Q(preferred_language__isnull=True)
-                | Q(preferred_language='')
-            )
-
         # Filter out manually dismissed suggestions
         dismissed_ids = self.get_dismissed_suggestions(user)
         if dismissed_ids:
@@ -169,8 +160,6 @@ class SuggestedUsers(RedisStore):
         cache_key = f"suggested-users-{user.id}-{'local' if local else 'all'}"
         if not user.show_inactive_suggestions:
             cache_key = f"{cache_key}-active"
-        if user.filter_suggestions_by_language:
-            cache_key = f"{cache_key}-lang-{user.preferred_language or 'none'}"
 
         cached = cache.get(cache_key)
         if cached is not None:
@@ -204,8 +193,6 @@ def invalidate_suggestions_cache(user_id):
     Called when user follows/unfollows/blocks someone, ensuring
     the cache stays consistent with the user's relationships.
     """
-    from bookwyrm import models
-
     # Base cache keys
     keys_to_delete = [
         f"suggested-users-{user_id}-all",
@@ -213,20 +200,6 @@ def invalidate_suggestions_cache(user_id):
         f"suggested-users-{user_id}-all-active",
         f"suggested-users-{user_id}-local-active",
     ]
-
-    # Add language-specific variants if user has language filtering enabled
-    try:
-        user = models.User.objects.get(id=user_id)
-        if user.filter_suggestions_by_language and user.preferred_language:
-            lang = user.preferred_language
-            keys_to_delete.extend([
-                f"suggested-users-{user_id}-all-lang-{lang}",
-                f"suggested-users-{user_id}-local-lang-{lang}",
-                f"suggested-users-{user_id}-all-active-lang-{lang}",
-                f"suggested-users-{user_id}-local-active-lang-{lang}",
-            ])
-    except models.User.DoesNotExist:
-        pass  # User deleted, just clear base keys
 
     cache.delete_many(keys_to_delete)
 
