@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("bookwyrm", "0221_user_force_password_reset"),
+        ("bookwyrm", "0224_book_bookwyrm_bo_remote__43009f_bloom_and_more"),
     ]
 
     operations = [

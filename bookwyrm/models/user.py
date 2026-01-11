@@ -1,4 +1,5 @@
-""" database schema for user data """
+"""database schema for user data"""
+
 import datetime
 from importlib import import_module
 import re
@@ -48,7 +49,6 @@ def get_feed_filter_choices():
     return [f[0] for f in FeedFilterChoices]
 
 
-# pylint: disable=too-many-public-methods
 class User(OrderedCollectionPageMixin, AbstractUser):
     """a user who wants to read books"""
 
@@ -241,7 +241,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     @property
     def alt_text(self):
         """alt text with username"""
-        # pylint: disable=consider-using-f-string
+
         return "avatar for {:s}".format(self.localname or self.username)
 
     @property
@@ -493,7 +493,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     @property
     def local_path(self):
         """this model doesn't inherit bookwyrm model, so here we are"""
-        # pylint: disable=consider-using-f-string
+
         return "/user/{:s}".format(self.localname or self.username)
 
     def create_shelves(self):
@@ -664,7 +664,6 @@ def get_remote_reviews(outbox):
         activitypub.Review(**activity).to_model()
 
 
-# pylint: disable=unused-argument
 @receiver(models.signals.post_save, sender=User)
 def preview_image(instance, *args, **kwargs):
     """create preview images when user is updated"""

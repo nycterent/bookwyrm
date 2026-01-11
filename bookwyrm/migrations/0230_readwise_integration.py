@@ -8,7 +8,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("bookwyrm", "0226_add_tufte_theme"),
+        ("bookwyrm", "0229_add_tufte_theme"),
     ]
 
     operations = [

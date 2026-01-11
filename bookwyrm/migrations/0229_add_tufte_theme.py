@@ -25,7 +25,7 @@ def remove_tufte_theme(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("bookwyrm", "0225_user_default_post_to_feed"),
+        ("bookwyrm", "0228_user_default_post_to_feed"),
     ]
 
     operations = [

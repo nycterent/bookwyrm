@@ -23,7 +23,7 @@ def download_file(url, destination):
         logger.error("Failed to download file %s: %s", url, err)
     except OSError as err:
         logger.error("Couldn't open font file %s for writing: %s", destination, err)
-    except Exception as err:  # pylint:disable=broad-except
+    except Exception as err:
         logger.error("Unknown error in file download: %s", err)
 
 
@@ -41,7 +41,6 @@ class BookwyrmConfig(AppConfig):
         from bookwyrm import newsletter  # noqa: F401
 
         if settings.OTEL_EXPORTER_OTLP_ENDPOINT or settings.OTEL_EXPORTER_CONSOLE:
-            # pylint: disable=import-outside-toplevel
             from bookwyrm.telemetry import open_telemetry
 
             open_telemetry.instrumentDjango()
