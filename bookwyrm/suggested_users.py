@@ -93,6 +93,24 @@ class SuggestedUsers(RedisStore):
         """take a user out of someone's suggestions"""
         self.bulk_remove_objects_from_store([suggested_user], self.store_id(user))
 
+    def dismiss_suggestion(self, user, suggested_user):
+        """Mark a suggestion as dismissed by the user"""
+        key = f"{user.id}-dismissed-suggestions"
+        r.sadd(key, suggested_user.id)
+        # Expire after 90 days - dismissed suggestions can resurface eventually
+        r.expire(key, 60 * 60 * 24 * 90)
+
+    def get_dismissed_suggestions(self, user):
+        """Get set of dismissed user IDs for this user"""
+        key = f"{user.id}-dismissed-suggestions"
+        dismissed_ids = r.smembers(key)
+        return {int(user_id) for user_id in dismissed_ids}
+
+    def clear_dismissed_suggestions(self, user):
+        """Clear all dismissed suggestions for a user"""
+        key = f"{user.id}-dismissed-suggestions"
+        r.delete(key)
+
     def get_suggestions(self, user, local=False):
         """get suggestions"""
         local = local or models.SiteSettings.get().disable_federation
@@ -129,6 +147,11 @@ class SuggestedUsers(RedisStore):
         # Filter by language if preference is enabled and user has a preferred language
         if user.filter_suggestions_by_language and user.preferred_language:
             users = users.filter(preferred_language=user.preferred_language)
+
+        # Filter out manually dismissed suggestions
+        dismissed_ids = self.get_dismissed_suggestions(user)
+        if dismissed_ids:
+            users = users.exclude(id__in=dismissed_ids)
 
         return users.order_by("-mutuals")[:5]
 
