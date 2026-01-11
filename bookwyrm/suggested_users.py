@@ -145,8 +145,13 @@ class SuggestedUsers(RedisStore):
             ).exclude(book_count=0, status_count=0)
 
         # Filter by language if preference is enabled and user has a preferred language
+        # Include users with matching language OR no language set (common for remote users)
         if user.filter_suggestions_by_language and user.preferred_language:
-            users = users.filter(preferred_language=user.preferred_language)
+            users = users.filter(
+                Q(preferred_language=user.preferred_language)
+                | Q(preferred_language__isnull=True)
+                | Q(preferred_language='')
+            )
 
         # Filter out manually dismissed suggestions
         dismissed_ids = self.get_dismissed_suggestions(user)
