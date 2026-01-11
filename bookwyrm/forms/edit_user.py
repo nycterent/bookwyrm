@@ -22,6 +22,7 @@ class EditUserForm(CustomForm):
             "show_ratings",
             "show_suggested_users",
             "show_inactive_suggestions",
+            "filter_suggestions_by_language",
             "newsletter_subscription",
             "default_post_to_feed",
             "manually_approves_followers",

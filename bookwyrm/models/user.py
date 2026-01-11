@@ -160,6 +160,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     show_goal = models.BooleanField(default=True)
     show_suggested_users = models.BooleanField(default=True)
     show_inactive_suggestions = models.BooleanField(default=True)
+    filter_suggestions_by_language = models.BooleanField(default=False)
     discoverable = fields.BooleanField(default=False)
     show_guided_tour = models.BooleanField(default=True)
     show_ratings = models.BooleanField(default=True)
