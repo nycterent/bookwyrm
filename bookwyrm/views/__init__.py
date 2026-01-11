@@ -152,6 +152,7 @@ from .feed import DirectMessage, Feed, Replies, Status
 from .follow import (
     follow,
     unfollow,
+    dismiss_suggestion,
     remove_follow,
     ostatus_follow_request,
     ostatus_follow_success,
