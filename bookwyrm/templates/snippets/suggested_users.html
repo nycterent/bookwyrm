@@ -3,7 +3,7 @@
 {% load humanize %}
 <div class="columns is-mobile scroll-x mb-0">
     {% for user in suggested_users %}
-    <div class="column is-flex is-flex-grow-0">
+    <div class="column is-flex is-flex-grow-0 suggest_{{ user.id }}">
         <div class="box has-text-centered is-shadowless has-background-tertiary m-0">
             <a href="{{ user.local_path }}" class="has-text-default">
                 {% include 'snippets/avatar.html' with user=user large=True %}
@@ -11,7 +11,7 @@
                 <span title="@{{ user|username }}" class="is-block pb-3">@{{ user|username|truncatechars:8 }}</span>
             </a>
             {% include 'snippets/follow_button.html' with user=user minimal=True %}
-            <form action="{% url 'dismiss-suggestion' %}" method="POST" class="interaction mt-2">
+            <form action="{% url 'dismiss-suggestion' %}" method="POST" class="interaction mt-2" data-id="suggest_{{ user.id }}">
                 {% csrf_token %}
                 <input type="hidden" name="user" value="{{ user.username }}">
                 <button class="button is-small" type="submit" title="{% trans 'Not interested' %}">
