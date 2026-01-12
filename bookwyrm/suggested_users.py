@@ -102,9 +102,12 @@ class SuggestedUsers(RedisStore):
 
     def get_dismissed_suggestions(self, user):
         """Get set of dismissed user IDs for this user"""
-        key = f"{user.id}-dismissed-suggestions"
-        dismissed_ids = r.smembers(key)
-        return {int(user_id) for user_id in dismissed_ids}
+        try:
+            key = f"{user.id}-dismissed-suggestions"
+            dismissed_ids = r.smembers(key)
+            return {int(user_id) for user_id in dismissed_ids if user_id}
+        except Exception:  # Redis error - return empty set
+            return set()
 
     def clear_dismissed_suggestions(self, user):
         """Clear all dismissed suggestions for a user"""
@@ -194,10 +197,11 @@ class SuggestedUsers(RedisStore):
         # Cache miss - compute and store
         suggestions = self.get_suggestions(user, local)
         # Evaluate queryset and cache the results (stores 15 for backups)
-        cache_data = [(u.id, u.mutuals) for u in suggestions]
+        suggestions_list = list(suggestions)  # Evaluate queryset once
+        cache_data = [(u.id, u.mutuals) for u in suggestions_list]
         cache.set(cache_key, cache_data, timeout=None)  # No TTL - event invalidated
         # Return only first 5 for display
-        return suggestions[:5]
+        return suggestions_list[:5]
 
 
 def invalidate_suggestions_cache(user_id):
