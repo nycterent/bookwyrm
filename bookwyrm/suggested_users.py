@@ -149,7 +149,8 @@ class SuggestedUsers(RedisStore):
         if dismissed_ids:
             users = users.exclude(id__in=dismissed_ids)
 
-        return users.order_by("-mutuals")[:5]
+        # Return 15 suggestions for caching (so we have backups when users dismiss)
+        return users.order_by("-mutuals")[:15]
 
     def get_suggestions_cached(self, user, local=False):
         """Get suggestions with caching - invalidated by events, not TTL.
@@ -175,12 +176,15 @@ class SuggestedUsers(RedisStore):
             if not cached:
                 return models.User.objects.none()
 
+            # Return only first 5 suggestions for display (cache has 15 for backups)
+            cached_to_display = cached[:5]
+
             annotations = [
                 When(pk=uid, then=Value(mutuals))
-                for uid, mutuals in cached
+                for uid, mutuals in cached_to_display
             ]
             return (
-                models.User.objects.filter(id__in=[uid for uid, _ in cached])
+                models.User.objects.filter(id__in=[uid for uid, _ in cached_to_display])
                 .annotate(
                     mutuals=Case(*annotations, output_field=IntegerField(), default=0)
                 )
@@ -189,10 +193,11 @@ class SuggestedUsers(RedisStore):
 
         # Cache miss - compute and store
         suggestions = self.get_suggestions(user, local)
-        # Evaluate queryset and cache the results
+        # Evaluate queryset and cache the results (stores 15 for backups)
         cache_data = [(u.id, u.mutuals) for u in suggestions]
         cache.set(cache_key, cache_data, timeout=None)  # No TTL - event invalidated
-        return suggestions
+        # Return only first 5 for display
+        return suggestions[:5]
 
 
 def invalidate_suggestions_cache(user_id):
