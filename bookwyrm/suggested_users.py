@@ -167,6 +167,14 @@ class SuggestedUsers(RedisStore):
             if not cached:
                 return models.User.objects.none()
 
+            # Filter out manually dismissed suggestions from cached results
+            dismissed_ids = self.get_dismissed_suggestions(user)
+            if dismissed_ids:
+                cached = [(uid, mutuals) for uid, mutuals in cached if uid not in dismissed_ids]
+
+            if not cached:
+                return models.User.objects.none()
+
             annotations = [
                 When(pk=uid, then=Value(mutuals))
                 for uid, mutuals in cached
