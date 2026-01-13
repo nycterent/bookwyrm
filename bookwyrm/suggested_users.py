@@ -99,15 +99,28 @@ class SuggestedUsers(RedisStore):
         r.sadd(key, suggested_user.id)
         # Expire after 90 days - dismissed suggestions can resurface eventually
         r.expire(key, 60 * 60 * 24 * 90)
+        # Invalidate the cached dismissed list
+        cache.delete(f"dismissed-suggestions-{user.id}")
 
     def get_dismissed_suggestions(self, user):
-        """Get set of dismissed user IDs for this user"""
+        """Get set of dismissed user IDs for this user (cached)"""
+        # Cache the dismissed list in Django cache to avoid Redis hits on every page load
+        cache_key = f"dismissed-suggestions-{user.id}"
+        cached_dismissed = cache.get(cache_key)
+
+        if cached_dismissed is not None:
+            return cached_dismissed
+
         try:
             key = f"{user.id}-dismissed-suggestions"
             dismissed_ids = r.smembers(key)
-            return {int(user_id) for user_id in dismissed_ids if user_id}
+            dismissed_set = {int(user_id) for user_id in dismissed_ids if user_id}
         except Exception:  # Redis error - return empty set
-            return set()
+            dismissed_set = set()
+
+        # Cache for 60 seconds - balance between freshness and performance
+        cache.set(cache_key, dismissed_set, timeout=60)
+        return dismissed_set
 
     def clear_dismissed_suggestions(self, user):
         """Clear all dismissed suggestions for a user"""
