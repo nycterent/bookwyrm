@@ -156,7 +156,7 @@ def has_valid_signature(request, activity):
             # Fetch and cache
             try:
                 remote_user = activitypub.resolve_remote_id(
-                    actor_url, model=models.User
+                    actor_url, model=models.User, save=False
                 )
                 if remote_user:
                     cache_public_key(actor_url, remote_user)

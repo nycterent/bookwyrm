@@ -236,33 +236,37 @@ def invalidate_suggestions_cache(user_id):
 
 def get_annotated_users(viewer, *args, **kwargs):
     """Users, annotated with things they have in common"""
-    # Pre-fetch following IDs once to avoid double evaluation in annotation
+    following = kwargs.pop("following", None)
     following_ids = list(viewer.following.values_list("id", flat=True))
+    query = models.User.objects.filter(
+        discoverable=True, is_active=True, *args, **kwargs
+    ).exclude(Q(id__in=viewer.blocks.all()) | Q(blocks=viewer) | Q(id=viewer.id))
 
-    return (
-        models.User.objects.filter(discoverable=True, is_active=True, *args, **kwargs)
-        .exclude(Q(id__in=viewer.blocks.all()) | Q(blocks=viewer))
-        .annotate(
-            mutuals=Count(
-                "followers",
-                filter=Q(
-                    ~Q(id=viewer.id),
-                    ~Q(id__in=following_ids),
-                    followers__id__in=following_ids,
-                ),
-                distinct=True,
+    if following is True:
+        query = query.filter(id__in=following_ids)
+    elif following is False:
+        query = query.exclude(id__in=following_ids)
+
+    return query.annotate(
+        mutuals=Count(
+            "followers",
+            filter=Q(
+                ~Q(id=viewer.id),
+                ~Q(id__in=following_ids),
+                followers__id__in=following_ids,
             ),
-            # shared_books=Count(
-            #     "shelfbook",
-            #     filter=Q(
-            #         ~Q(id=viewer.id),
-            #         shelfbook__book__parent_work__in=[
-            #             s.book.parent_work for s in viewer.shelfbook_set.all()
-            #         ],
-            #     ),
-            #     distinct=True,
-            # ),
-        )
+            distinct=True,
+        ),
+        # shared_books=Count(
+        #     "shelfbook",
+        #     filter=Q(
+        #         ~Q(id=viewer.id),
+        #         shelfbook__book__parent_work__in=[
+        #             s.book.parent_work for s in viewer.shelfbook_set.all()
+        #         ],
+        #     ),
+        #     distinct=True,
+        # ),
     )
 
 

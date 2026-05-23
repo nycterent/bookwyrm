@@ -277,7 +277,33 @@ def set_related_field(
         if existing:
             data = existing.to_activity()
         else:
-            data = get_data(data)
+            try:
+                data = get_data(data)
+            except requests.HTTPError as e:
+                if (
+                    hasattr(e, "response")
+                    and hasattr(e.response, "status_code")
+                    and e.response.status_code in (401, 404, 410)
+                ):
+                    logger.info(
+                        "Remote resource unavailable (%s) for related field - remote_id: %s",
+                        e.response.status_code,
+                        data,
+                    )
+                else:
+                    logger.warning(
+                        "HTTP error fetching related field - remote_id: %s - error: %s",
+                        data,
+                        e,
+                    )
+                return
+            except ConnectorException as e:
+                logger.info(
+                    "Could not connect to fetch related field - remote_id: %s - error: %s",
+                    data,
+                    e,
+                )
+                return
     activity = model.activity_serializer(**data)
 
     # this must exist because it's the object that triggered this function

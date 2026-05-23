@@ -1,6 +1,6 @@
 """bookwyrm settings and configuration"""
 
-from bookwyrm.settings import *
+from bookwyrm.settings import *  # noqa
 from celery.schedules import crontab
 
 QUERY_TIMEOUT = env.int("CELERY_QUERY_TIMEOUT", env.int("QUERY_TIMEOUT", 30))

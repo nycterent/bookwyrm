@@ -58,6 +58,7 @@ class EditionForm(CustomForm):
             "inventaire_id",
             "goodreads_key",
             "finna_key",
+            "libris_key",
             "oclc_number",
             "asin",
             "aasin",
@@ -114,6 +115,9 @@ class EditionForm(CustomForm):
                 attrs={"aria-describedby": "desc_oclc_number"}
             ),
             "finna_key": forms.TextInput(attrs={"aria-describedby": "desc_finna_key"}),
+            "libris_key": forms.TextInput(
+                attrs={"aria-describedby": "desc_libris_key"}
+            ),
             "ASIN": forms.TextInput(attrs={"aria-describedby": "desc_ASIN"}),
             "AASIN": forms.TextInput(attrs={"aria-describedby": "desc_AASIN"}),
             "isfdb": forms.TextInput(attrs={"aria-describedby": "desc_isfdb"}),
@@ -142,4 +146,16 @@ class EditionFromWorkForm(CustomForm):
             "subject_places",
             "cover",
             "first_published_date",
+        ]
+
+
+class SeriesForm(CustomForm):
+    class Meta:
+        model = models.Series
+        fields = [
+            "name",
+            "alternative_names",
+            "inventaire_id",
+            "wikidata",
+            "isfdb",
         ]
