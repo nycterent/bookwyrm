@@ -1,0 +1,19 @@
+bookwyrm/activitypub/base_activity.py
+  s_1dadb658feca9e::t_0ca1b5477a9933 280-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "b2e7f596fcdab2fd8cad05f4f7287fd5dc5dd040",
+  "prompts": {},
+  "sessions": {
+    "s_1dadb658feca9e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5670-e179-7e40-baef-39bcce44f939",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Marty <saint@ghost.lt>"
+    }
+  }
+}
