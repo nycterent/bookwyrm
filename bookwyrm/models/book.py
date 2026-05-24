@@ -1,16 +1,17 @@
 """database schema for books and shelves"""
 
 from itertools import chain
+from functools import reduce
 import re
+import operator
 from typing import Any, Dict, Optional, Iterable
 from typing_extensions import Self
-
 from django.contrib.postgres.search import SearchVectorField
-from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.indexes import GinIndex, BloomIndex, Index
 from django.core.cache import cache
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, PermissionDenied
 from django.db import models, transaction
-from django.db.models import Prefetch, ManyToManyField
+from django.db.models import Prefetch, ManyToManyField, Q
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 from model_utils import FieldTracker
@@ -30,7 +31,12 @@ from bookwyrm.settings import (
 )
 from bookwyrm.utils.db import format_trigger, add_update_fields
 
-from .activitypub_mixin import OrderedCollectionPageMixin, ObjectMixin
+from .activitypub_mixin import (
+    OrderedCollectionMixin,
+    CollectionItemMixin,
+    OrderedCollectionPageMixin,
+    ObjectMixin,
+)
 from .base_model import BookWyrmModel
 from . import fields
 
@@ -43,6 +49,9 @@ class BookDataModel(ObjectMixin, BookWyrmModel):
         max_length=255, blank=True, null=True, deduplication_field=True
     )
     finna_key = fields.CharField(
+        max_length=255, blank=True, null=True, deduplication_field=True
+    )
+    libris_key = fields.CharField(
         max_length=255, blank=True, null=True, deduplication_field=True
     )
     inventaire_id = fields.CharField(
@@ -99,6 +108,16 @@ class BookDataModel(ObjectMixin, BookWyrmModel):
     def finna_link(self):
         """generate the url from the finna key"""
         return f"http://finna.fi/Record/{self.finna_key}"
+
+    @property
+    def wikidata_link(self):
+        """generate the url from the isfdb id"""
+        return f"https://www.wikidata.org/wiki/{self.wikidata}"
+
+    @property
+    def libris_link(self):
+        """generate the url from the libris key"""
+        return f"https://libris.kb.se/bib/{self.libris_key}"
 
     class Meta:
         """can't initialize this model, that wouldn't make sense"""
@@ -226,6 +245,14 @@ class MergedAuthor(MergedBookDataModel):
     )
 
 
+class MergedSeries(MergedBookDataModel):
+    """an Series that has been merged into another one"""
+
+    merged_into = models.ForeignKey(
+        "Series", on_delete=models.PROTECT, related_name="absorbed"
+    )
+
+
 class Book(BookDataModel):
     """a generic book, which can mean either an edition or a work"""
 
@@ -241,8 +268,11 @@ class Book(BookDataModel):
     languages = fields.ArrayField(
         models.CharField(max_length=255), blank=True, default=list
     )
+
+    # these legacy fields are still used for editing and as a fallback:
     series = fields.TextField(max_length=255, blank=True, null=True)
     series_number = fields.CharField(max_length=255, blank=True, null=True)
+
     subjects = fields.ArrayField(
         models.CharField(max_length=255), blank=True, null=True, default=list
     )
@@ -372,6 +402,13 @@ class Book(BookDataModel):
 
         return re.sub(f"^{' |^'.join(articles)} ", "", str(self.title).lower())
 
+    def book_series(self):
+        """get the series this book is in"""
+        series = set()
+        for sb in self.seriesbooks.all():
+            series.add(sb.series)
+        return list(series)
+
     def __repr__(self):
         return "<{} key={!r} title={!r}>".format(
             self.__class__,
@@ -382,7 +419,28 @@ class Book(BookDataModel):
     class Meta:
         """set up indexes and triggers"""
 
-        indexes = (GinIndex(fields=["search_vector"]),)
+        indexes = [
+            GinIndex(fields=["search_vector"]),
+            # Add bloom index for all deduplication_fields
+            BloomIndex(
+                fields=[
+                    "origin_id",
+                    "remote_id",
+                    "openlibrary_key",
+                    "finna_key",
+                    "libris_key",
+                    "inventaire_id",
+                    "librarything_key",
+                    "goodreads_key",
+                    "bnf_id",
+                    "viaf",
+                    "wikidata",
+                    "asin",
+                    "aasin",
+                    "isfdb",
+                ]
+            ),
+        ]
         triggers = [
             pgtrigger.Trigger(
                 name="update_search_vector_on_book_edit",
@@ -460,8 +518,13 @@ class Work(OrderedCollectionPageMixin, Book):
     serialize_reverse_fields = [
         ("editions", "editions", "-edition_rank"),
         ("file_links", "fileLinks", "-created_date"),
+        ("seriesbooks", "seriesBooks", "-created_date"),
     ]
-    deserialize_reverse_fields = [("editions", "editions"), ("file_links", "fileLinks")]
+    deserialize_reverse_fields = [
+        ("editions", "editions"),
+        ("file_links", "fileLinks"),
+        ("seriesbooks", "seriesBooks"),
+    ]
 
 
 # https://schema.org/BookFormatType
@@ -604,8 +667,97 @@ class Edition(Book):
 
     activity_serializer = activitypub.Edition
     name_field = "title"
-    serialize_reverse_fields = [("file_links", "fileLinks", "-created_date")]
-    deserialize_reverse_fields = [("file_links", "fileLinks")]
+    serialize_reverse_fields = [
+        ("file_links", "fileLinks", "-created_date"),
+        ("seriesbooks", "seriesBooks", "-created_date"),
+    ]
+    deserialize_reverse_fields = [
+        ("file_links", "fileLinks"),
+        ("seriesbooks", "seriesBooks"),
+    ]
+
+    class Meta:
+        indexes = [
+            BloomIndex(
+                fields=[
+                    "isbn_10",
+                    "isbn_13",
+                    "oclc_number",
+                ]
+            ),
+            Index(fields=["parent_work", "-edition_rank"]),
+        ]
+
+    @classmethod
+    def find_existing(cls, data):
+        """compare data to fields that can be used for deduplication.
+        This always includes remote_id, but can also be unique identifiers
+        like an isbn for an edition"""
+        filters = []
+        # grabs all the data from the model to create django queryset filters
+        for field in cls._meta.get_fields():
+            if (
+                not hasattr(field, "deduplication_field")
+                or not field.deduplication_field
+            ):
+                continue
+
+            value = data.get(field.get_activitypub_field())
+            if not value:
+                continue
+            filters.append({field.name: value})
+
+        if "id" in data:
+            # kinda janky, but this handles special case for books
+            filters.append({"origin_id": data["id"]})
+
+        if not filters:
+            # if there are no deduplication fields, it will match the first
+            # item no matter what. this shouldn't happen but just in case.
+            return None
+
+        # For books, we want to first check with isbn10/13/oclc fields if possible
+        # as it hits Edition table bloom index
+        book_filters = []
+        for filter_item in filters:
+            filter_fields = {
+                field_name: field_value
+                for field_name, field_value in filter_item.items()
+                if field_name in ["isbn_10", "isbn_13", "oclc_number"]
+            }
+            if filter_fields:
+                book_filters.append(filter_fields)
+        objects = cls.objects
+        if hasattr(objects, "select_subclasses"):
+            objects = objects.select_subclasses()
+
+        if book_filters:
+            possible_book = objects.filter(
+                reduce(operator.or_, (Q(**f) for f in book_filters))
+            )
+            if (book := possible_book.first()) is not None:
+                return book
+
+        # if no match, drop isbn10/13/oclc_number from filters so bloom index hits from Book-table
+        book_filters = []
+        for filter_item in filters:
+            filter_fields = {
+                field_name: field_value
+                for field_name, field_value in filter_item.items()
+                if field_name not in ["isbn_10", "isbn_13", "oclc_number"]
+            }
+            if filter_fields:
+                book_filters.append(filter_fields)
+
+        filters = book_filters
+
+        if not filters:
+            return None
+
+        # an OR operation on all the match fields, sorry for the dense syntax
+        match = objects.filter(reduce(operator.or_, (Q(**f) for f in filters)))
+        # there OUGHT to be only one match
+        return match.first()
 
     @property
     def hyphenated_isbn13(self):
@@ -634,6 +786,15 @@ class Edition(Book):
         rank += int(bool(self.description))
         # max rank is 9
         return rank
+
+    def clean(self):
+        """Don't try to add a series the book is already part of"""
+        if self.pk and self.series:
+            if self.parent_work.seriesbooks.filter(
+                Q(series__name__iexact=self.series)
+                | Q(series__alternative_names__icontains=self.series)
+            ):
+                raise ValidationError({"series": _("Book is already in this series")})
 
     def save(
         self, *args: Any, update_fields: Optional[Iterable[str]] = None, **kwargs: Any
@@ -777,3 +938,68 @@ def preview_image(instance, *args, **kwargs):
         transaction.on_commit(
             lambda: generate_edition_preview_image_task.delay(instance.id)
         )
+
+
+class Series(OrderedCollectionMixin, BookDataModel):
+    """a series of books"""
+
+    user = fields.ForeignKey(
+        "User", on_delete=models.PROTECT, activitypub_field="actor", related_name="+"
+    )  # for broadcast, should always be instance user but we can't set that here
+    name = fields.TextField(max_length=255)
+    alternative_names = fields.ArrayField(
+        fields.CharField(max_length=255), blank=True, default=list
+    )  # like aliases on an author
+
+    activity_serializer = activitypub.Series
+
+    def get_remote_id(self):
+        """series need a remote id"""
+        return f"{BASE_URL}/series/{self.id}"
+
+    @property
+    def collection_queryset(self):
+        """list of books for this series, overrides OrderedCollectionMixin"""
+        seriesbooks = self.seriesbooks.all().values("book__pk")
+        works = Work.objects.filter(id__in=seriesbooks)
+        books = Edition.objects.filter(parent_work__in=works).order_by("-updated_date")
+        return books
+
+    def raise_not_editable(self, viewer):
+        if not viewer.has_perm("bookwyrm.edit_book"):
+            raise PermissionDenied()
+
+    @property
+    def isfdb_link(self):
+        """generate the url from the isfdb id"""
+        return f"https://www.isfdb.org/cgi-bin/pe.cgi?{self.isfdb}"
+
+
+class SeriesBook(CollectionItemMixin, BookWyrmModel):
+    """connect a book to a series with a series number"""
+
+    user = fields.ForeignKey(
+        "User", on_delete=models.PROTECT, activitypub_field="actor", related_name="+"
+    )  # for broadcast, should always be instance user but we can't set that here
+    series = fields.ForeignKey(
+        "Series", on_delete=models.CASCADE, related_name="seriesbooks"
+    )
+    book = fields.ForeignKey(
+        "Book", on_delete=models.CASCADE, related_name="seriesbooks"
+    )
+    series_number = fields.CharField(max_length=255, blank=True, null=True)
+
+    collection_field = "series"
+    activity_serializer = activitypub.SeriesBook
+
+    class Meta:
+        ordering = ["series_number"]
+        unique_together = [("book", "series"), ("series", "series_number")]
+
+    def get_remote_id(self):
+        """need a remote id to provide the URI for series"""
+        return f"{BASE_URL}/seriesbook/{self.id}"
+
+    def raise_not_editable(self, viewer):
+        if not viewer.has_perm("bookwyrm.edit_book"):
+            raise PermissionDenied()

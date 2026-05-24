@@ -98,6 +98,11 @@ urlpatterns = [
     re_path(
         r"^settings/dashboard/?$", views.Dashboard.as_view(), name="settings-dashboard"
     ),
+    re_path(
+        r"^settings/instance-stats/?$",
+        views.InstanceStats.as_view(),
+        name="settings-instance-stats",
+    ),
     re_path(r"^settings/site-settings/?$", views.Site.as_view(), name="settings-site"),
     re_path(
         r"^settings/site-registration/?$",
@@ -462,6 +467,7 @@ urlpatterns = [
     re_path(
         r"^settings/celery/ping/?$", views.celery_ping, name="settings-celery-ping"
     ),
+    re_path(r"^settings/redis/?$", views.RedisStatus.as_view(), name="settings-redis"),
     re_path(
         r"^settings/schedules/(?P<task_id>\d+)?$",
         views.ScheduledTasks.as_view(),
@@ -769,6 +775,11 @@ urlpatterns = [
         views.ExportArchive.as_view(),
         name="prefs-export-file",
     ),
+    re_path(
+        r"^preferences/readwise/?$",
+        views.ReadwiseSettings.as_view(),
+        name="prefs-readwise",
+    ),
     re_path(r"^preferences/move/?$", views.MoveUser.as_view(), name="prefs-move"),
     re_path(r"^preferences/alias/?$", views.AliasUser.as_view(), name="prefs-alias"),
     re_path(
@@ -829,11 +840,6 @@ urlpatterns = [
     # books
     re_path(rf"{BOOK_PATH}(.json)?/?$", views.Book.as_view(), name="book"),
     re_path(rf"{BOOK_PATH}{regex.SLUG}/?$", views.Book.as_view(), name="book"),
-    re_path(
-        r"^series/by/(?P<author_id>\d+)/?$",
-        views.BookSeriesBy.as_view(),
-        name="book-series-by",
-    ),
     re_path(
         rf"{BOOK_PATH}/(?P<user_statuses>review|comment|quote)/?$",
         views.Book.as_view(),
@@ -909,6 +915,25 @@ urlpatterns = [
         views.EditAuthor.as_view(),
         name="edit-author",
     ),
+    # series
+    re_path(
+        rf"^series/(?P<series_id>\d+)(.json)?{regex.SLUG}/?$",
+        views.Series.as_view(),
+        name="series",
+    ),
+    re_path(
+        r"^series/(?P<series_id>\d+)(.json)/?$", views.Series.as_view()
+    ),  # activitypub
+    re_path(
+        r"^series/(?P<series_id>\d+)/edit/?$",
+        views.EditSeries.as_view(),
+        name="edit-series",
+    ),
+    re_path(
+        r"^seriesbook/(?P<seriesbook_id>\d+)(.json)?/?$",
+        views.SeriesBook.as_view(),
+        name="seriesbook",
+    ),
     # reading progress
     re_path(r"^edit-readthrough/?$", views.edit_readthrough, name="edit-readthrough"),
     re_path(r"^delete-readthrough/?$", views.delete_readthrough),
@@ -932,6 +957,7 @@ urlpatterns = [
     # following
     re_path(r"^follow/?$", views.follow, name="follow"),
     re_path(r"^unfollow/?$", views.unfollow, name="unfollow"),
+    re_path(r"^dismiss-suggestion/?$", views.dismiss_suggestion, name="dismiss-suggestion"),
     re_path(
         r"^remove-follow/(?P<user_id>\d+)/?$", views.remove_follow, name="remove-follow"
     ),

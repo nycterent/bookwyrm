@@ -4,7 +4,7 @@ from __future__ import absolute_import, unicode_literals
 import os
 
 from celery import Celery
-from . import settings
+from . import settings  # noqa
 
 
 # set the default Django settings module for the 'celery' program.
@@ -20,3 +20,7 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Load task modules from all registered Django app configs.
 app.autodiscover_tasks()
+
+# Newsletter tasks use @shared_task decorator which auto-registers
+# when the module is imported. We import it via Celery beat schedule
+# in celerywyrm/settings.py which references the task by name.

@@ -18,6 +18,7 @@ from requests import HTTPError
 from bookwyrm import book_search, models
 from bookwyrm.book_search import SearchResult
 from bookwyrm.connectors import abstract_connector
+from bookwyrm.connectors.connector_backoff import ConnectorBackoff
 from bookwyrm.settings import SEARCH_TIMEOUT
 from bookwyrm.tasks import app, CONNECTORS
 
@@ -109,12 +110,16 @@ def first_search_result(
 
 
 def get_connectors() -> Iterator[abstract_connector.AbstractConnector]:
-    """load all connectors"""
+    """load all connectors, skipping those disabled or in backoff"""
     queryset = models.Connector.objects.filter(active=True)
     if models.SiteSettings.get().disable_federation:
         queryset = queryset.exclude(connector_file="bookwyrm_connector")
 
     for info in queryset.order_by("priority").all():
+        # Skip connectors that are in backoff due to recent failures
+        if ConnectorBackoff.should_skip(info.identifier):
+            logger.debug("Skipping connector %s - in backoff period", info.identifier)
+            continue
         yield load_connector(info)
 
 
@@ -230,4 +235,19 @@ def create_finna_connector() -> None:
         "&field[]=title&field[]=recordPage&field[]=authors&field[]=year"
         "&field[]=id&field[]=formats&field[]=images"
         "&lookfor=isbn:",
+    )
+
+
+def create_libris_connector() -> None:
+    """create a Libris connector"""
+
+    models.Connector.objects.create(
+        identifier="libris.kb.se",
+        name="Libris",
+        connector_file="libris",
+        base_url="https://libris.kb.se",
+        books_url="http://libris.kb.se/xsearch?format=json&format_level=full&n=1&query=",
+        covers_url="https://libris.kb.se",
+        search_url="http://libris.kb.se/xsearch?format=json&format_level=full&n=20&query=",
+        isbn_search_url="http://libris.kb.se/xsearch?format=json&format_level=full&n=5&query=isbn:",
     )

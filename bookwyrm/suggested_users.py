@@ -2,6 +2,8 @@
 
 import math
 import logging
+from django.core.cache import cache
+from django.db.models import Value
 from django.dispatch import receiver
 from django.db import transaction
 from django.db.models import signals, Count, Q, Case, When, IntegerField
@@ -91,6 +93,40 @@ class SuggestedUsers(RedisStore):
         """take a user out of someone's suggestions"""
         self.bulk_remove_objects_from_store([suggested_user], self.store_id(user))
 
+    def dismiss_suggestion(self, user, suggested_user):
+        """Mark a suggestion as dismissed by the user"""
+        key = f"{user.id}-dismissed-suggestions"
+        r.sadd(key, suggested_user.id)
+        # Expire after 90 days - dismissed suggestions can resurface eventually
+        r.expire(key, 60 * 60 * 24 * 90)
+        # Invalidate the cached dismissed list
+        cache.delete(f"dismissed-suggestions-{user.id}")
+
+    def get_dismissed_suggestions(self, user):
+        """Get set of dismissed user IDs for this user (cached)"""
+        # Cache the dismissed list in Django cache to avoid Redis hits on every page load
+        cache_key = f"dismissed-suggestions-{user.id}"
+        cached_dismissed = cache.get(cache_key)
+
+        if cached_dismissed is not None:
+            return cached_dismissed
+
+        try:
+            key = f"{user.id}-dismissed-suggestions"
+            dismissed_ids = r.smembers(key)
+            dismissed_set = {int(user_id) for user_id in dismissed_ids if user_id}
+        except Exception:  # Redis error - return empty set
+            dismissed_set = set()
+
+        # Cache for 60 seconds - balance between freshness and performance
+        cache.set(cache_key, dismissed_set, timeout=60)
+        return dismissed_set
+
+    def clear_dismissed_suggestions(self, user):
+        """Clear all dismissed suggestions for a user"""
+        key = f"{user.id}-dismissed-suggestions"
+        r.delete(key)
+
     def get_suggestions(self, user, local=False):
         """get suggestions"""
         local = local or models.SiteSettings.get().disable_federation
@@ -105,6 +141,8 @@ class SuggestedUsers(RedisStore):
             models.User.objects.filter(
                 is_active=True, bookwyrm_user=True, id__in=[pk for (pk, _) in values]
             )
+            .exclude(followers=user)
+            .exclude(follower_requests=user)
             .annotate(
                 mutuals=Case(*annotations, output_field=IntegerField(), default=0)
             )
@@ -112,35 +150,123 @@ class SuggestedUsers(RedisStore):
         )
         if local:
             users = users.filter(local=True)
-        return users.order_by("-mutuals")[:5]
+
+        # Filter out inactive users (no books AND no statuses) if preference is set
+        if not user.show_inactive_suggestions:
+            users = users.annotate(
+                book_count=Count("shelfbook", distinct=True),
+                status_count=Count(
+                    "status", filter=Q(status__deleted=False), distinct=True
+                ),
+            ).exclude(book_count=0, status_count=0)
+
+        # Filter out manually dismissed suggestions
+        dismissed_ids = self.get_dismissed_suggestions(user)
+        if dismissed_ids:
+            users = users.exclude(id__in=dismissed_ids)
+
+        # Return 15 suggestions for caching (so we have backups when users dismiss)
+        return users.order_by("-mutuals")[:15]
+
+    def get_suggestions_cached(self, user, local=False):
+        """Get suggestions with caching - invalidated by events, not TTL.
+
+        Cache key includes user_id to prevent data leakage between users.
+        Cache is invalidated when user follows/unfollows/blocks someone.
+        """
+        cache_key = f"suggested-users-{user.id}-{'local' if local else 'all'}"
+        if not user.show_inactive_suggestions:
+            cache_key = f"{cache_key}-active"
+
+        cached = cache.get(cache_key)
+        if cached is not None:
+            # Return users from cached IDs with pre-computed mutuals
+            if not cached:
+                return models.User.objects.none()
+
+            # Filter out manually dismissed suggestions from cached results
+            dismissed_ids = self.get_dismissed_suggestions(user)
+            if dismissed_ids:
+                cached = [(uid, mutuals) for uid, mutuals in cached if uid not in dismissed_ids]
+
+            if not cached:
+                return models.User.objects.none()
+
+            # Return only first 5 suggestions for display (cache has 15 for backups)
+            cached_to_display = cached[:5]
+
+            annotations = [
+                When(pk=uid, then=Value(mutuals))
+                for uid, mutuals in cached_to_display
+            ]
+            return (
+                models.User.objects.filter(id__in=[uid for uid, _ in cached_to_display])
+                .annotate(
+                    mutuals=Case(*annotations, output_field=IntegerField(), default=0)
+                )
+                .order_by("-mutuals")
+            )
+
+        # Cache miss - compute and store
+        suggestions = self.get_suggestions(user, local)
+        # Evaluate queryset and cache the results (stores 15 for backups)
+        suggestions_list = list(suggestions)  # Evaluate queryset once
+        cache_data = [(u.id, u.mutuals) for u in suggestions_list]
+        cache.set(cache_key, cache_data, timeout=None)  # No TTL - event invalidated
+        # Return only first 5 for display
+        return suggestions_list[:5]
+
+
+def invalidate_suggestions_cache(user_id):
+    """Clear all cached suggestion variants for a user.
+
+    Called when user follows/unfollows/blocks someone, ensuring
+    the cache stays consistent with the user's relationships.
+    """
+    # Base cache keys
+    keys_to_delete = [
+        f"suggested-users-{user_id}-all",
+        f"suggested-users-{user_id}-local",
+        f"suggested-users-{user_id}-all-active",
+        f"suggested-users-{user_id}-local-active",
+    ]
+
+    cache.delete_many(keys_to_delete)
 
 
 def get_annotated_users(viewer, *args, **kwargs):
     """Users, annotated with things they have in common"""
-    return (
-        models.User.objects.filter(discoverable=True, is_active=True, *args, **kwargs)
-        .exclude(Q(id__in=viewer.blocks.all()) | Q(blocks=viewer))
-        .annotate(
-            mutuals=Count(
-                "followers",
-                filter=Q(
-                    ~Q(id=viewer.id),
-                    ~Q(id__in=viewer.following.all()),
-                    followers__in=viewer.following.all(),
-                ),
-                distinct=True,
+    following = kwargs.pop("following", None)
+    following_ids = list(viewer.following.values_list("id", flat=True))
+    query = models.User.objects.filter(
+        discoverable=True, is_active=True, *args, **kwargs
+    ).exclude(Q(id__in=viewer.blocks.all()) | Q(blocks=viewer) | Q(id=viewer.id))
+
+    if following is True:
+        query = query.filter(id__in=following_ids)
+    elif following is False:
+        query = query.exclude(id__in=following_ids)
+
+    return query.annotate(
+        mutuals=Count(
+            "followers",
+            filter=Q(
+                ~Q(id=viewer.id),
+                ~Q(id__in=following_ids),
+                followers__id__in=following_ids,
             ),
-            # shared_books=Count(
-            #     "shelfbook",
-            #     filter=Q(
-            #         ~Q(id=viewer.id),
-            #         shelfbook__book__parent_work__in=[
-            #             s.book.parent_work for s in viewer.shelfbook_set.all()
-            #         ],
-            #     ),
-            #     distinct=True,
-            # ),
-        )
+            distinct=True,
+        ),
+        # shared_books=Count(
+        #     "shelfbook",
+        #     filter=Q(
+        #         ~Q(id=viewer.id),
+        #         shelfbook__book__parent_work__in=[
+        #             s.book.parent_work for s in viewer.shelfbook_set.all()
+        #         ],
+        #     ),
+        #     distinct=True,
+        # ),
     )
 
 
@@ -155,6 +281,8 @@ def update_suggestions_on_follow(sender, instance, created, *args, **kwargs):
 
     if instance.user_subject.local:
         remove_suggestion_task.delay(instance.user_subject.id, instance.user_object.id)
+        # Invalidate cached suggestions for the user who followed
+        invalidate_suggestions_cache(instance.user_subject.id)
     rerank_user_task.delay(instance.user_object.id, update_only=False)
 
 
@@ -166,6 +294,8 @@ def update_suggestions_on_follow_request(sender, instance, created, *args, **kwa
 
     if instance.user_subject.local:
         remove_suggestion_task.delay(instance.user_subject.id, instance.user_object.id)
+        # Invalidate cached suggestions for the user who sent the request
+        invalidate_suggestions_cache(instance.user_subject.id)
 
 
 @receiver(signals.post_save, sender=models.UserBlocks)
@@ -173,8 +303,12 @@ def update_suggestions_on_block(sender, instance, *args, **kwargs):
     """remove blocked users from recs"""
     if instance.user_subject.local and instance.user_object.discoverable:
         remove_suggestion_task.delay(instance.user_subject.id, instance.user_object.id)
+        # Invalidate cached suggestions for the user who blocked
+        invalidate_suggestions_cache(instance.user_subject.id)
     if instance.user_object.local and instance.user_subject.discoverable:
         remove_suggestion_task.delay(instance.user_object.id, instance.user_subject.id)
+        # Invalidate cached suggestions for the blocked user too
+        invalidate_suggestions_cache(instance.user_object.id)
 
 
 @receiver(signals.post_delete, sender=models.UserFollows)
@@ -182,6 +316,9 @@ def update_suggestions_on_unfollow(sender, instance, **kwargs):
     """update rankings, but don't re-suggest because it was probably intentional"""
     if instance.user_object.discoverable:
         rerank_user_task.delay(instance.user_object.id, update_only=False)
+    # Invalidate cached suggestions for the user who unfollowed
+    if instance.user_subject.local:
+        invalidate_suggestions_cache(instance.user_subject.id)
 
 
 # @receiver(signals.post_save, sender=models.ShelfBook)

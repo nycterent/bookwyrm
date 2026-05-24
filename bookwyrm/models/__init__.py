@@ -3,7 +3,7 @@
 import inspect
 import sys
 
-from .book import Book, Work, Edition, BookDataModel
+from .book import Book, Work, Edition, BookDataModel, Series, SeriesBook
 from .author import Author
 from .link import Link, FileLink, LinkDomain
 from .connector import Connector
@@ -11,7 +11,7 @@ from .connector import Connector
 from .shelf import Shelf, ShelfBook
 from .list import List, ListItem
 
-from .status import Status, GeneratedNote, Comment, Quotation
+from .status import Status, GeneratedNote, BookStatus, Comment, Quotation
 from .status import Review, ReviewRating
 from .status import Boost
 from .attachment import Image
@@ -49,6 +49,8 @@ from .notification import Notification, NotificationType
 from .hashtag import Hashtag
 
 from .session import UserSession, create_user_session
+
+from .readwise import ReadwiseSync, ReadwiseSyncedHighlight
 
 cls_members = inspect.getmembers(sys.modules[__name__], inspect.isclass)
 activity_models = {

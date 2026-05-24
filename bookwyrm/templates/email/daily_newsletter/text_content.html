@@ -1,0 +1,70 @@
+{% load i18n %}
+
+{{ site_name }} - {% trans "Daily Book Updates" %}
+{{ date_str }}
+
+{% trans "Good morning," %} {{ user }}!
+
+{% blocktrans trimmed %}Here's what happened in your reading community:{% endblocktrans %}
+
+{% if featured_review or grid_reviews %}
+=== {% trans "Reviews" %} ===
+
+{% if featured_review %}
+{% trans "Featured:" %}
+{{ featured_review.activity.user.display_name }} {% trans "reviewed" %}:
+{{ featured_review.activity.book.title }}{% if featured_review.activity.rating %} ({{ featured_review.activity.rating }}/5 {% trans "stars" %}){% endif %}
+{% if featured_review.activity.content %}"{{ featured_review.activity.content|striptags|truncatechars:150 }}"{% endif %}
+{% trans "Read Review:" %} {{ base_url }}{{ featured_review.activity.local_path }}
+
+{% endif %}
+{% if grid_reviews %}
+{% for review in grid_reviews %}
+{{ review.activity.user.display_name }} {% trans "reviewed" %}:
+- {{ review.activity.book.title }}{% if review.activity.rating %} ({{ review.activity.rating }}/5){% endif %}
+  {{ base_url }}{{ review.activity.local_path }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+{% if followed_activities.comments %}
+=== {% trans "Comments" %} ===
+
+{% for group in followed_activities.comments %}
+{{ group.user.display_name }} {% trans "commented:" %}
+{% for item in group.items %}
+- {{ item.activity.book.title }}
+{% if item.activity.content %}  "{{ item.activity.content|striptags|truncatechars:120 }}"{% endif %}
+  {{ base_url }}{{ item.activity.local_path }}
+{% endfor %}
+
+{% endfor %}
+{% endif %}
+
+{% if featured_highlight %}
+=== {% trans "Highlight" %} ===
+
+{% trans "From" %} "{{ featured_highlight.activity.book.title }}":
+{% if featured_highlight.activity.quote %}"{{ featured_highlight.activity.quote|striptags|truncatechars:250 }}"{% endif %}
+- {% trans "Highlighted by" %} {{ featured_highlight.activity.user.display_name }}
+{{ base_url }}{{ featured_highlight.activity.local_path }}
+
+{% endif %}
+
+{% if currently_reading %}
+=== {% trans "You're Currently Reading" %} ===
+
+{% for item in currently_reading %}
+- {{ item.readthrough.book.title }}{% if item.readthrough.progress %} ({{ item.readthrough.progress }}% {% trans "complete" %}){% endif %}
+  {{ base_url }}{{ item.readthrough.book.local_path }}
+{% endfor %}
+
+{% endif %}
+
+---
+
+{% trans "Visit your feed:" %} {{ feed_url }}
+{% trans "Email preferences:" %} {{ email_preferences_url }}
+
+{% blocktrans %}BookWyrm hosted on {{ site_name }}{% endblocktrans %}
+{{ domain }}

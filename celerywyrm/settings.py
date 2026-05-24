@@ -1,6 +1,7 @@
 """bookwyrm settings and configuration"""
 
-from bookwyrm.settings import *
+from bookwyrm.settings import *  # noqa
+from celery.schedules import crontab
 
 QUERY_TIMEOUT = env.int("CELERY_QUERY_TIMEOUT", env.int("QUERY_TIMEOUT", 30))
 
@@ -31,6 +32,22 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TIMEZONE = env("TIME_ZONE", "UTC")
 
+# Beat schedule for periodic tasks
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-backoff-entries": {
+        "task": "bookwyrm.tasks.cleanup_backoff_entries",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
+    "sync-connector-health": {
+        "task": "bookwyrm.connectors.connector_backoff.sync_connector_health",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "send-daily-newsletter": {
+        "task": "bookwyrm.newsletter.send_daily_newsletter",
+        "schedule": crontab(hour=5, minute=0),  # Daily at 5 AM UTC (7-8 AM Lithuanian time)
+    },
+}
+
 CELERY_WORKER_CONCURRENCY = env("CELERY_WORKER_CONCURRENCY", None)
 CELERY_TASK_SOFT_TIME_LIMIT = env("CELERY_TASK_SOFT_TIME_LIMIT", None)
 
@@ -40,6 +57,7 @@ INSTALLED_APPS = INSTALLED_APPS + [
     "celerywyrm",
 ]
 
-ROOT_URLCONF = "celerywyrm.urls"
+# Use bookwyrm.urls so email templates can resolve URL names like 'prefs-profile'
+ROOT_URLCONF = "bookwyrm.urls"
 
 WSGI_APPLICATION = "celerywyrm.wsgi.application"

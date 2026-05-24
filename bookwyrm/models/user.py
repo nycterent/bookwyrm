@@ -159,9 +159,12 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     # options to turn features on and off
     show_goal = models.BooleanField(default=True)
     show_suggested_users = models.BooleanField(default=True)
+    show_inactive_suggestions = models.BooleanField(default=True)
     discoverable = fields.BooleanField(default=False)
     show_guided_tour = models.BooleanField(default=True)
     show_ratings = models.BooleanField(default=True)
+    newsletter_subscription = models.BooleanField(default=False)
+    default_post_to_feed = models.BooleanField(default=True)
 
     # feed options
     feed_status_types = DjangoArrayField(
@@ -200,12 +203,24 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     hotp_secret = models.CharField(max_length=32, default=None, blank=True, null=True)
     hotp_count = models.IntegerField(default=0, blank=True, null=True)
 
+    # Readwise integration
+    readwise_token = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Readwise API token for highlight sync",
+    )
+    readwise_auto_export = models.BooleanField(
+        default=False,
+        help_text="Automatically export new quotes to Readwise",
+    )
+
     class Meta(AbstractUser.Meta):
         """indexes"""
 
         indexes = [
             models.Index(fields=["username"]),
-            models.Index(fields=["is_active", "local"]),
+            models.Index(fields=["local", "is_active", "last_active_date"]),
         ]
 
     @property

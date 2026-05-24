@@ -74,6 +74,24 @@ def unfollow(request):
 
 @login_required
 @require_POST
+def dismiss_suggestion(request):
+    """dismiss a user from suggestions"""
+    from bookwyrm.suggested_users import suggested_users
+
+    username = request.POST["user"]
+    to_dismiss = get_user_from_username(request.user, username)
+
+    # Mark as dismissed in Redis
+    suggested_users.dismiss_suggestion(request.user, to_dismiss)
+
+    if is_api_request(request):
+        return HttpResponse()
+    # this is handled with ajax so it shouldn't really matter
+    return redirect("/")
+
+
+@login_required
+@require_POST
 def remove_follow(request, user_id):
     """remove a previously approved follower without blocking them"""
 
