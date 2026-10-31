@@ -27,15 +27,16 @@ jobs:
           done
           got=$(sha256sum /tmp/fix.gz | cut -d' ' -f1)
           echo "assembled: $got"
-          echo "expected : $EXPECTED_SHA"
           test "$got" = "$EXPECTED_SHA"
           gunzip -c /tmp/fix.gz > /tmp/fix.patch
           git apply --whitespace=nowarn /tmp/fix.patch
           git status --short
-      - name: Re-format with the versions CI pins
+      - name: Re-apply the same ruff passes and the stylelint autofix CI expects
         run: |
           set -euo pipefail
           python -m pip install --quiet "ruff==0.14.7"
+          ruff format .
+          ruff check --fix . || true
           ruff format .
           mkdir -p /tmp/sl && cd /tmp/sl
           npm install --silent --no-fund --no-audit stylelint stylelint-config-recommended stylelint-config-standard stylelint-order stylelint-config-standard-scss
