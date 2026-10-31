@@ -1,5 +1,6 @@
 name: apply-ci-fixes
 on:
+  workflow_dispatch:
   push:
     branches: [fixapply]
 permissions:
