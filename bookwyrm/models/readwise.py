@@ -32,12 +32,12 @@ class ReadwiseSync(models.Model):
     def __str__(self):
         return f"ReadwiseSync for {self.user.username}"
 
-    def mark_export(self):
+    def mark_export(self) -> None:
         """Update last export timestamp"""
         self.last_export_at = timezone.now()
         self.save(update_fields=["last_export_at", "updated_at"])
 
-    def mark_import(self):
+    def mark_import(self) -> None:
         """Update last import timestamp"""
         self.last_import_at = timezone.now()
         self.save(update_fields=["last_import_at", "updated_at"])

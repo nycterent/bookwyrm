@@ -228,11 +228,17 @@ def filter_stream_by_status_type(
             boost__boosted_status__review__reviewrating__isnull=True
         )
     if "comment" not in allowed_types:
-        filters &= Q(comment__isnull=True) & Q(boost__boosted_status__comment__isnull=True)
+        filters &= Q(comment__isnull=True) & Q(
+            boost__boosted_status__comment__isnull=True
+        )
     if "quotation" not in allowed_types:
-        filters &= Q(quotation__isnull=True) & Q(boost__boosted_status__quotation__isnull=True)
+        filters &= Q(quotation__isnull=True) & Q(
+            boost__boosted_status__quotation__isnull=True
+        )
     if "everything" not in allowed_types:
-        filters &= Q(generatednote__isnull=True) & Q(boost__boosted_status__generatednote__isnull=True)
+        filters &= Q(generatednote__isnull=True) & Q(
+            boost__boosted_status__generatednote__isnull=True
+        )
 
     # Apply all filters in a single call
     if filters:

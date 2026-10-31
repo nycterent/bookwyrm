@@ -475,7 +475,11 @@ def resolve_remote_id(
 
         if cached_result:
             logger.warning(f"Using cached {remote_id} due to backoff")
-            return cached_result if not get_activity else cached_result.to_activity_dataclass()
+            return (
+                cached_result
+                if not get_activity
+                else cached_result.to_activity_dataclass()
+            )
         else:
             next_retry = RemoteInstanceBackoff.get_next_retry_time(remote_id)
             raise ActivitySerializerError(

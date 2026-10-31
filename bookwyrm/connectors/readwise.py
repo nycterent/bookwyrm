@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urljoin
 
 import requests
@@ -38,9 +38,7 @@ class ReadwiseClient:
         self.session.headers["Authorization"] = f"Token {token}"
         self.session.headers["Content-Type"] = "application/json"
 
-    def _request(
-        self, method: str, endpoint: str, **kwargs
-    ) -> Optional[requests.Response]:
+    def _request(self, method: str, endpoint: str, **kwargs: Any) -> requests.Response:
         """Make a request to Readwise API with rate limiting"""
         url = urljoin(self.BASE_URL, endpoint)
         try:
@@ -67,7 +65,9 @@ class ReadwiseClient:
         except ReadwiseAPIError:
             return False
 
-    def export_highlights(self, updated_after: Optional[datetime] = None) -> list:
+    def export_highlights(
+        self, updated_after: Optional[datetime] = None
+    ) -> list[dict[str, Any]]:
         """
         Export highlights from Readwise.
         Only returns books (filters out articles, tweets, podcasts).
@@ -105,7 +105,7 @@ class ReadwiseClient:
 
         return books
 
-    def create_highlights(self, highlights: list) -> dict:
+    def create_highlights(self, highlights: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Create highlights in Readwise.
 
@@ -126,7 +126,8 @@ class ReadwiseClient:
             API response dict
         """
         response = self._request("POST", "highlights/", json={"highlights": highlights})
-        return response.json()
+        result: dict[str, Any] = response.json()
+        return result
 
 
 def _get_or_create_sync(user: models.User) -> models.ReadwiseSync:
@@ -151,16 +152,17 @@ def _match_book(title: str, author: str) -> Optional[models.Edition]:
 
     # Search using connector_manager
     search_query = f"{title} {author}" if author else title
-    results = connector_manager.search(search_query, min_confidence=0.8)
+    results = connector_manager.search(
+        search_query, min_confidence=0.8, return_first=False
+    )
 
-    if results:
-        # Return the first result that has an edition
-        for result in results:
-            if hasattr(result, "edition") and result.edition:
-                return result.edition
-            # Try to get or create from the result
+    # Each item is a {connector, results} pair; the individual matches live
+    # under "results" as SearchResult objects carrying the key to fetch.
+    for connector_result in results:
+        connector = connector_result["connector"]
+        for result in connector_result["results"]:
             try:
-                book = result.connector.get_or_create_book(result.key)
+                book = connector.get_or_create_book(result.key)
                 if isinstance(book, models.Edition):
                     return book
                 if isinstance(book, models.Work) and book.default_edition:
@@ -172,9 +174,9 @@ def _match_book(title: str, author: str) -> Optional[models.Edition]:
     return None
 
 
-def _quotation_to_highlight(quotation: models.Quotation) -> dict:
+def _quotation_to_highlight(quotation: models.Quotation) -> dict[str, Any]:
     """Convert a BookWyrm Quotation to Readwise highlight format"""
-    highlight = {
+    highlight: dict[str, Any] = {
         "text": quotation.raw_quote or strip_tags(quotation.quote),
         "title": quotation.book.title,
         "source_type": "bookwyrm",
@@ -188,8 +190,12 @@ def _quotation_to_highlight(quotation: models.Quotation) -> dict:
 
     # Add location/page info
     if quotation.position:
-        highlight["location"] = int(quotation.position) if quotation.position.isdigit() else 0
-        highlight["location_type"] = "page" if quotation.position_mode == "PG" else "order"
+        highlight["location"] = (
+            int(quotation.position) if quotation.position.isdigit() else 0
+        )
+        highlight["location_type"] = (
+            "page" if quotation.position_mode == "PG" else "order"
+        )
 
     # Add note (user's commentary on the quote)
     if quotation.content:
@@ -254,7 +260,7 @@ def export_quote_to_readwise(quotation_id: int) -> bool:
 
 
 @app.task(queue=CONNECTORS)
-def export_all_quotes_to_readwise(user_id: int) -> dict:
+def export_all_quotes_to_readwise(user_id: int) -> dict[str, Any]:
     """
     Export all unexported quotes for a user to Readwise.
 
@@ -339,7 +345,7 @@ def export_all_quotes_to_readwise(user_id: int) -> dict:
 
 
 @app.task(queue=CONNECTORS)
-def import_readwise_highlights(user_id: int) -> dict:
+def import_readwise_highlights(user_id: int) -> dict[str, Any]:
     """
     Import highlights from Readwise for a user.
 
@@ -464,7 +470,9 @@ def import_readwise_highlights(user_id: int) -> dict:
                     )
 
             except Exception as e:
-                logger.error(f"Failed to create quotation from highlight {readwise_id}: {e}")
+                logger.error(
+                    f"Failed to create quotation from highlight {readwise_id}: {e}"
+                )
 
     # Update sync timestamp
     sync.mark_import()

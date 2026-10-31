@@ -196,6 +196,8 @@ def has_valid_signature(request, activity):
                 clear_cached_key(actor_url)
                 raise
     except (ValueError, requests.exceptions.HTTPError) as e:
-        logger.warning(f"Signature verification failed for {activity.get('actor')}: {e}")
+        logger.warning(
+            f"Signature verification failed for {activity.get('actor')}: {e}"
+        )
         return False
     return True

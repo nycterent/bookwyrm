@@ -96,9 +96,9 @@ class SuggestedUsers(RedisStore):
     def dismiss_suggestion(self, user, suggested_user):
         """Mark a suggestion as dismissed by the user"""
         key = f"{user.id}-dismissed-suggestions"
-        r.sadd(key, suggested_user.id)
+        redis_instance.sadd(key, suggested_user.id)
         # Expire after 90 days - dismissed suggestions can resurface eventually
-        r.expire(key, 60 * 60 * 24 * 90)
+        redis_instance.expire(key, 60 * 60 * 24 * 90)
         # Invalidate the cached dismissed list
         cache.delete(f"dismissed-suggestions-{user.id}")
 
@@ -113,7 +113,7 @@ class SuggestedUsers(RedisStore):
 
         try:
             key = f"{user.id}-dismissed-suggestions"
-            dismissed_ids = r.smembers(key)
+            dismissed_ids = redis_instance.smembers(key)
             dismissed_set = {int(user_id) for user_id in dismissed_ids if user_id}
         except Exception:  # Redis error - return empty set
             dismissed_set = set()
@@ -125,7 +125,7 @@ class SuggestedUsers(RedisStore):
     def clear_dismissed_suggestions(self, user):
         """Clear all dismissed suggestions for a user"""
         key = f"{user.id}-dismissed-suggestions"
-        r.delete(key)
+        redis_instance.delete(key)
 
     def get_suggestions(self, user, local=False):
         """get suggestions"""
@@ -191,7 +191,11 @@ class SuggestedUsers(RedisStore):
             # Filter out manually dismissed suggestions from cached results
             dismissed_ids = self.get_dismissed_suggestions(user)
             if dismissed_ids:
-                cached = [(uid, mutuals) for uid, mutuals in cached if uid not in dismissed_ids]
+                cached = [
+                    (uid, mutuals)
+                    for uid, mutuals in cached
+                    if uid not in dismissed_ids
+                ]
 
             if not cached:
                 return models.User.objects.none()
@@ -200,8 +204,7 @@ class SuggestedUsers(RedisStore):
             cached_to_display = cached[:5]
 
             annotations = [
-                When(pk=uid, then=Value(mutuals))
-                for uid, mutuals in cached_to_display
+                When(pk=uid, then=Value(mutuals)) for uid, mutuals in cached_to_display
             ]
             return (
                 models.User.objects.filter(id__in=[uid for uid, _ in cached_to_display])

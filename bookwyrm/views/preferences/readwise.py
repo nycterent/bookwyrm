@@ -99,7 +99,9 @@ class ReadwiseSettings(View):
         )
         messages.success(
             request,
-            _("Export started. Your quotes will be synced to Readwise in the background."),
+            _(
+                "Export started. Your quotes will be synced to Readwise in the background."
+            ),
         )
         return redirect("prefs-readwise")
 
@@ -110,12 +112,12 @@ class ReadwiseSettings(View):
             return redirect("prefs-readwise")
 
         # Trigger async import
-        transaction.on_commit(
-            lambda: import_readwise_highlights.delay(request.user.id)
-        )
+        transaction.on_commit(lambda: import_readwise_highlights.delay(request.user.id))
         messages.success(
             request,
-            _("Import started. Readwise highlights will be imported in the background."),
+            _(
+                "Import started. Readwise highlights will be imported in the background."
+            ),
         )
         return redirect("prefs-readwise")
 

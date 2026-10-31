@@ -57,8 +57,7 @@ class Feed(View):
         annual_summary_year = get_annual_summary_year()
         has_summary_read_throughs = (
             models.ReadThrough.objects.filter(
-                user=request.user,
-                finish_date__lte=date(annual_summary_year, 12, 31)
+                user=request.user, finish_date__lte=date(annual_summary_year, 12, 31)
             ).exists()
             if annual_summary_year
             else False

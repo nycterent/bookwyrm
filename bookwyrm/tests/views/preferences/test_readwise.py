@@ -1,5 +1,6 @@
 """Tests for Readwise integration views"""
-from unittest.mock import patch, MagicMock
+
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.test.client import RequestFactory
@@ -21,32 +22,32 @@ class TestReadwiseImports(TestCase):
         from bookwyrm.views.preferences import readwise
 
         # Verify key components exist
-        self.assertTrue(hasattr(readwise, 'ReadwiseSettings'))
-        self.assertTrue(hasattr(readwise, '_'))  # Translation function
-        self.assertTrue(hasattr(readwise, 'messages'))
+        self.assertTrue(hasattr(readwise, "ReadwiseSettings"))
+        self.assertTrue(hasattr(readwise, "_"))  # Translation function
+        self.assertTrue(hasattr(readwise, "messages"))
 
     def test_readwise_connector_imports(self):
         """Verify readwise connector module imports without errors"""
         from bookwyrm.connectors import readwise
 
         # Verify key components exist
-        self.assertTrue(hasattr(readwise, 'ReadwiseClient'))
-        self.assertTrue(hasattr(readwise, 'export_quote_to_readwise'))
-        self.assertTrue(hasattr(readwise, 'export_all_quotes_to_readwise'))
-        self.assertTrue(hasattr(readwise, 'import_readwise_highlights'))
+        self.assertTrue(hasattr(readwise, "ReadwiseClient"))
+        self.assertTrue(hasattr(readwise, "export_quote_to_readwise"))
+        self.assertTrue(hasattr(readwise, "export_all_quotes_to_readwise"))
+        self.assertTrue(hasattr(readwise, "import_readwise_highlights"))
 
     def test_readwise_models_imports(self):
         """Verify readwise models import without errors"""
         from bookwyrm.models import readwise
 
         # Verify key components exist
-        self.assertTrue(hasattr(readwise, 'ReadwiseSync'))
-        self.assertTrue(hasattr(readwise, 'ReadwiseSyncedHighlight'))
+        self.assertTrue(hasattr(readwise, "ReadwiseSync"))
+        self.assertTrue(hasattr(readwise, "ReadwiseSyncedHighlight"))
 
     def test_readwise_form_imports(self):
         """Verify readwise form imports without errors"""
         # Verify form exists in forms module
-        self.assertTrue(hasattr(forms, 'ReadwiseSettingsForm'))
+        self.assertTrue(hasattr(forms, "ReadwiseSettingsForm"))
 
 
 @patch("bookwyrm.activitystreams.add_book_statuses_task.delay")
@@ -102,10 +103,13 @@ class ReadwiseSettingsViewTest(TestCase):
 
     def test_readwise_save_settings(self, *_):
         """Test saving Readwise settings"""
-        request = self.factory.post("", {
-            "readwise_token": "new_test_token",
-            "readwise_auto_export": True,
-        })
+        request = self.factory.post(
+            "",
+            {
+                "readwise_token": "new_test_token",
+                "readwise_auto_export": True,
+            },
+        )
         request.user = self.local_user
 
         result = views.ReadwiseSettings.as_view()(request)
@@ -143,7 +147,7 @@ class ReadwiseSettingsViewTest(TestCase):
         request.user = self.local_user
 
         # Use transaction.on_commit callback
-        from django.test import override_settings
+
         with self.captureOnCommitCallbacks(execute=True):
             result = views.ReadwiseSettings.as_view()(request)
 
@@ -216,6 +220,7 @@ class ReadwiseModelsTest(TestCase):
         models.ReadwiseSync.objects.create(user=self.local_user)
 
         from django.db import IntegrityError
+
         with self.assertRaises(IntegrityError):
             models.ReadwiseSync.objects.create(user=self.local_user)
 
@@ -241,6 +246,7 @@ class ReadwiseModelsTest(TestCase):
         )
 
         from django.db import IntegrityError
+
         with self.assertRaises(IntegrityError):
             models.ReadwiseSyncedHighlight.objects.create(
                 user=self.local_user,

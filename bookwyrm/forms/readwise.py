@@ -17,9 +17,7 @@ class ReadwiseSettingsForm(CustomForm):
             "readwise_auto_export",
         ]
         help_texts = {
-            "readwise_token": _(
-                "Get your token from readwise.io/access_token"
-            ),
+            "readwise_token": _("Get your token from readwise.io/access_token"),
             "readwise_auto_export": _(
                 "Automatically export new quotes to Readwise when you create them"
             ),
@@ -46,7 +44,9 @@ class ReadwiseSettingsForm(CustomForm):
             token = token.strip()
             if token:
                 # Validate the token by calling Readwise API
-                from bookwyrm.connectors.readwise import ReadwiseClient, ReadwiseAPIError
+                from bookwyrm.connectors.readwise import (
+                    ReadwiseClient,
+                )
 
                 client = ReadwiseClient(token)
                 if not client.validate_token():

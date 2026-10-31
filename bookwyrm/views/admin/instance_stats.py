@@ -1,9 +1,10 @@
 """Instance statistics dashboard for federation and Readwise metrics"""
+
 import json
 from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.template.response import TemplateResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -66,8 +67,7 @@ def get_federation_stats():
 
     # Users from federated vs blocked servers
     users_from_federated = models.User.objects.filter(
-        local=False,
-        federated_server__status="federated"
+        local=False, federated_server__status="federated"
     ).count()
 
     return {
@@ -86,28 +86,29 @@ def get_federation_stats():
 def get_readwise_stats():
     """Get Readwise integration statistics"""
     # Users with Readwise configured
-    users_with_token = models.User.objects.filter(
-        local=True,
-        readwise_token__isnull=False
-    ).exclude(readwise_token="").count()
+    users_with_token = (
+        models.User.objects.filter(local=True, readwise_token__isnull=False)
+        .exclude(readwise_token="")
+        .count()
+    )
 
     # Users with auto-export enabled
-    users_with_auto_export = models.User.objects.filter(
-        local=True,
-        readwise_auto_export=True,
-        readwise_token__isnull=False
-    ).exclude(readwise_token="").count()
+    users_with_auto_export = (
+        models.User.objects.filter(
+            local=True, readwise_auto_export=True, readwise_token__isnull=False
+        )
+        .exclude(readwise_token="")
+        .count()
+    )
 
     # Exported quotes (quotes with readwise_highlight_id)
     exported_quotes = models.Quotation.objects.filter(
-        deleted=False,
-        readwise_highlight_id__isnull=False
+        deleted=False, readwise_highlight_id__isnull=False
     ).count()
 
     # Total quotes available for export
     total_quotes = models.Quotation.objects.filter(
-        deleted=False,
-        user__local=True
+        deleted=False, user__local=True
     ).count()
 
     # Imported highlights
@@ -137,7 +138,10 @@ def get_readwise_stats():
             "matched_highlights": matched_highlights,
             "unmatched_highlights": unmatched_highlights,
             "match_percentage": round(
-                (matched_highlights / total_imported * 100) if total_imported > 0 else 0, 1
+                (matched_highlights / total_imported * 100)
+                if total_imported > 0
+                else 0,
+                1,
             ),
             "recent_syncs": recent_syncs,
         }
@@ -258,7 +262,7 @@ def get_activity_stats(now, interval_days):
             user__local=True,
             deleted=False,
             created_date__gte=day_start,
-            created_date__lt=day_end
+            created_date__lt=day_end,
         ).count()
         status_by_day.append(count)
 
@@ -272,7 +276,7 @@ def get_activity_stats(now, interval_days):
             user__local=True,
             deleted=False,
             created_date__gte=day_start,
-            created_date__lt=day_end
+            created_date__lt=day_end,
         ).count()
         quotes_by_day.append(count)
 
@@ -283,8 +287,7 @@ def get_activity_stats(now, interval_days):
         day_end = day_start + timedelta(days=1)
 
         count = models.FederatedServer.objects.filter(
-            created_date__gte=day_start,
-            created_date__lt=day_end
+            created_date__gte=day_start, created_date__lt=day_end
         ).count()
         servers_by_day.append(count)
 

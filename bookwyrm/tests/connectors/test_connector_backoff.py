@@ -1,12 +1,15 @@
 """Tests for Connector Health Backoff System"""
+
 import json
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from datetime import datetime
 
 from django.test import TestCase
 from django.core.cache import cache
 
-from bookwyrm.connectors.connector_backoff import ConnectorBackoff, sync_connector_health
+from bookwyrm.connectors.connector_backoff import (
+    ConnectorBackoff,
+    sync_connector_health,
+)
 from bookwyrm import models
 
 
@@ -239,4 +242,6 @@ class TestSyncConnectorHealth(TestCase):
         self.connector.refresh_from_db()
 
         # Check health status was updated
-        self.assertIn(self.connector.health_status, ["healthy", "degraded", "unavailable"])
+        self.assertIn(
+            self.connector.health_status, ["healthy", "degraded", "unavailable"]
+        )

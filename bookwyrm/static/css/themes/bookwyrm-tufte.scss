@@ -17,12 +17,12 @@ $danger: #c62828;
 $no-cover-color: #363636;
 
 /* background colors - clean whites */
-$scheme-main: #ffffff;
-$background-body: #ffffff;
+$scheme-main: #fff;
+$background-body: #fff;
 $background-secondary: #fafafa;
 $background-tertiary: #f5f5f5;
 $scrollbar-track: $background-secondary;
-$scrollbar-thumb: #cccccc;
+$scrollbar-thumb: #ccc;
 
 /* highlight colors */
 $primary-highlight: #fdf2f2;
@@ -32,13 +32,13 @@ $success-highlight: #e8f5e9;
 /* borders - subtle grays */
 $border: #e0e0e0;
 $border-hover: #bdbdbd;
-$border-light: #eeeeee;
+$border-light: #eee;
 $border-light-hover: #e0e0e0;
 
 /* text - high contrast black */
-$text: #000000;
+$text: #000;
 $text-light: #4a4a4a;
-$text-strong: #000000;
+$text-strong: #000;
 
 /* links - Tufte red */
 $link: #b50101;
@@ -52,7 +52,7 @@ $background: $background-secondary;
 $menu-item-active-background-color: $link-background;
 
 /* misc */
-$invisible-overlay-background-color: rgba(0, 0, 0, 0.66);
+$invisible-overlay-background-color: rgb(0, 0, 0, 0.66);
 
 /* Fonts - clean sans-serif */
 $family-primary: $family-sans-serif;
@@ -77,8 +77,8 @@ $family-secondary: $family-sans-serif;
 }
 
 .tabs li.is-active a {
-    color: #000000 !important;
-    border-bottom-color: #000000 !important;
+    color: #000 !important;
+    border-bottom-color: #000 !important;
 }
 
 @import "../bookwyrm";

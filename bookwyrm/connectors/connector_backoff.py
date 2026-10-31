@@ -9,15 +9,13 @@ Implements progressive retry delays with automatic recovery:
 - Maximum: 300s (5 minutes)
 - Recovery: After 1 hour of no failures
 """
-import hashlib
+
 import json
 import logging
-import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any
 
 from django.core.cache import cache
-from django.utils import timezone
 
 from bookwyrm import models
 from bookwyrm.tasks import app, CONNECTORS
@@ -202,7 +200,7 @@ class ConnectorBackoff:
         cache.set(stats_key, json.dumps(stats), cls.STATS_WINDOW)
 
     @classmethod
-    def _empty_stats(cls) -> dict:
+    def _empty_stats(cls) -> dict[str, Any]:
         """Return empty stats structure"""
         return {
             "success_count": 0,
@@ -212,7 +210,7 @@ class ConnectorBackoff:
         }
 
     @classmethod
-    def get_health_stats(cls, connector_id: str) -> dict:
+    def get_health_stats(cls, connector_id: str) -> dict[str, Any]:
         """
         Get current health statistics for a connector.
 
@@ -274,7 +272,7 @@ class ConnectorBackoff:
         }
 
     @classmethod
-    def get_all_connector_stats(cls) -> list:
+    def get_all_connector_stats(cls) -> list[dict[str, Any]]:
         """Get health stats for all active connectors"""
         connectors = models.Connector.objects.filter(active=True)
         return [
@@ -289,7 +287,7 @@ class ConnectorBackoff:
 
 
 @app.task(queue=CONNECTORS)
-def sync_connector_health() -> dict:
+def sync_connector_health() -> dict[str, Any]:
     """
     Periodic task to sync connector health stats to database.
 

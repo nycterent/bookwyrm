@@ -1,4 +1,5 @@
 """Tests for Instance Stats admin view"""
+
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -45,9 +46,7 @@ class InstanceStatsViewTest(TestCase):
                 remote_id="https://example.com/users/admin",
             )
             # Grant admin permissions
-            cls.admin_user.groups.add(
-                models.Group.objects.get(name="admin")
-            )
+            cls.admin_user.groups.add(models.Group.objects.get(name="admin"))
 
     def setUp(self):
         """Individual test setup"""

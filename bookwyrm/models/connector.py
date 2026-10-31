@@ -119,9 +119,7 @@ class Connector(BookWyrmModel):
         self.last_failure_at = timezone.now()
 
         self._update_health_status()
-        self.save(
-            update_fields=["failure_count", "last_failure_at", "health_status"]
-        )
+        self.save(update_fields=["failure_count", "last_failure_at", "health_status"])
 
     def _update_health_status(self) -> None:
         """Update health status based on success rate"""
