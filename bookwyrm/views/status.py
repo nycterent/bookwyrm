@@ -22,7 +22,6 @@ from bookwyrm.models.status import Status
 import mistune
 from bookwyrm import forms, models
 from bookwyrm.models.report import DELETE_ITEM
-from bookwyrm.readwise import sync_readwise_quotation
 from bookwyrm.utils import regex, sanitizer
 from bookwyrm.views.helpers import get_mergeable_object_or_404
 from .helpers import handle_remote_webfinger, is_api_request
@@ -138,19 +137,6 @@ class CreateStatus(View):
             status.quote = to_markdown(status.quote)
 
         status.save(created=created)
-        if isinstance(status, models.Quotation) and status.user.readwise_api_key:
-            sync_readwise_quotation.delay(status.id)
-
-        # Auto-export to Readwise if enabled
-        if (
-            created
-            and isinstance(status, models.Quotation)
-            and request.user.readwise_auto_export
-            and request.user.readwise_token
-        ):
-            from bookwyrm.connectors.readwise import export_quote_to_readwise
-
-            transaction.on_commit(lambda: export_quote_to_readwise.delay(status.id))
 
         # update a readthrough, if needed
         if bool(request.POST.get("id")):

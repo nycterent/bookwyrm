@@ -84,7 +84,6 @@ from .preferences.security import (
     LoginWith2FA,
     Prompt2FA,
 )
-from .preferences.readwise import ReadwiseSettings
 
 # books
 from .books.books import (

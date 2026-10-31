@@ -18,7 +18,6 @@ class TestInstanceStatsImports(TestCase):
 
         self.assertTrue(hasattr(instance_stats, "InstanceStats"))
         self.assertTrue(hasattr(instance_stats, "get_federation_stats"))
-        self.assertTrue(hasattr(instance_stats, "get_readwise_stats"))
         self.assertTrue(hasattr(instance_stats, "get_activity_stats"))
         self.assertTrue(hasattr(instance_stats, "get_connector_stats"))
 
@@ -99,20 +98,6 @@ class InstanceStatsFunctionsTest(TestCase):
         self.assertIn("blocked_servers", federation)
         self.assertIn("remote_users", federation)
         self.assertIn("software_breakdown", federation)
-
-    def test_get_readwise_stats(self):
-        """Test readwise stats function returns expected structure"""
-        from bookwyrm.views.admin.instance_stats import get_readwise_stats
-
-        stats = get_readwise_stats()
-        self.assertIn("readwise", stats)
-        readwise = stats["readwise"]
-        self.assertIn("users_with_token", readwise)
-        self.assertIn("exported_quotes", readwise)
-        self.assertIn("total_quotes", readwise)
-        self.assertIn("total_imported", readwise)
-        self.assertIn("matched_highlights", readwise)
-        self.assertIn("unmatched_highlights", readwise)
 
     def test_get_activity_stats(self):
         """Test activity stats function returns expected structure"""

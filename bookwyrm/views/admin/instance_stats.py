@@ -1,4 +1,4 @@
-"""Instance statistics dashboard for federation and Readwise metrics"""
+"""Instance statistics dashboard for federation and connector metrics"""
 
 import json
 from datetime import timedelta
@@ -23,7 +23,7 @@ from bookwyrm.connectors.connector_backoff import ConnectorBackoff
     name="dispatch",
 )
 class InstanceStats(View):
-    """Extended instance statistics with federation and Readwise metrics"""
+    """Extended instance statistics with federation and connector metrics"""
 
     @csp_update(
         SCRIPT_SRC="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
@@ -35,7 +35,6 @@ class InstanceStats(View):
 
         data = {
             **get_federation_stats(),
-            **get_readwise_stats(),
             **get_connector_stats(),
             **get_activity_stats(now, interval),
             "interval": interval,
@@ -79,71 +78,6 @@ def get_federation_stats():
             "users_from_federated": users_from_federated,
             # JSON-serialize for JavaScript template usage
             "software_breakdown": mark_safe(json.dumps(list(software_breakdown))),
-        }
-    }
-
-
-def get_readwise_stats():
-    """Get Readwise integration statistics"""
-    # Users with Readwise configured
-    users_with_token = (
-        models.User.objects.filter(local=True, readwise_token__isnull=False)
-        .exclude(readwise_token="")
-        .count()
-    )
-
-    # Users with auto-export enabled
-    users_with_auto_export = (
-        models.User.objects.filter(
-            local=True, readwise_auto_export=True, readwise_token__isnull=False
-        )
-        .exclude(readwise_token="")
-        .count()
-    )
-
-    # Exported quotes (quotes with readwise_highlight_id)
-    exported_quotes = models.Quotation.objects.filter(
-        deleted=False, readwise_highlight_id__isnull=False
-    ).count()
-
-    # Total quotes available for export
-    total_quotes = models.Quotation.objects.filter(
-        deleted=False, user__local=True
-    ).count()
-
-    # Imported highlights
-    total_imported = models.ReadwiseSyncedHighlight.objects.count()
-    matched_highlights = models.ReadwiseSyncedHighlight.objects.filter(
-        quotation__isnull=False
-    ).count()
-    unmatched_highlights = models.ReadwiseSyncedHighlight.objects.filter(
-        quotation__isnull=True
-    ).count()
-
-    # Recent sync activity
-    recent_syncs = models.ReadwiseSync.objects.filter(
-        last_export_at__isnull=False
-    ).order_by("-last_export_at")[:5]
-
-    return {
-        "readwise": {
-            "users_with_token": users_with_token,
-            "users_with_auto_export": users_with_auto_export,
-            "exported_quotes": exported_quotes,
-            "total_quotes": total_quotes,
-            "export_percentage": round(
-                (exported_quotes / total_quotes * 100) if total_quotes > 0 else 0, 1
-            ),
-            "total_imported": total_imported,
-            "matched_highlights": matched_highlights,
-            "unmatched_highlights": unmatched_highlights,
-            "match_percentage": round(
-                (matched_highlights / total_imported * 100)
-                if total_imported > 0
-                else 0,
-                1,
-            ),
-            "recent_syncs": recent_syncs,
         }
     }
 
