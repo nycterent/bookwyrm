@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from django.contrib.messages.storage.cookie import CookieStorage
 from django.test import TestCase
 from django.test.client import RequestFactory
 
@@ -78,10 +79,20 @@ class ReadwiseSettingsViewTest(TestCase):
         """Individual test setup"""
         self.factory = RequestFactory()
 
+    def _request(self, method, data=None):
+        """Build a request with message storage attached.
+
+        Middleware doesn't run when a view is called directly, so views that
+        add messages need storage set up by hand.
+        """
+        request = getattr(self.factory, method)("", data or {})
+        request.user = self.local_user
+        request._messages = CookieStorage(request)
+        return request
+
     def test_readwise_get_no_token(self, *_):
         """Test GET request without token configured"""
-        request = self.factory.get("")
-        request.user = self.local_user
+        request = self._request("get")
         result = views.ReadwiseSettings.as_view()(request)
         validate_html(result.render())
         self.assertEqual(result.status_code, 200)
@@ -91,8 +102,7 @@ class ReadwiseSettingsViewTest(TestCase):
         self.local_user.readwise_token = "test_token"
         self.local_user.save()
 
-        request = self.factory.get("")
-        request.user = self.local_user
+        request = self._request("get")
         result = views.ReadwiseSettings.as_view()(request)
         validate_html(result.render())
         self.assertEqual(result.status_code, 200)
@@ -101,16 +111,17 @@ class ReadwiseSettingsViewTest(TestCase):
         self.local_user.readwise_token = None
         self.local_user.save()
 
-    def test_readwise_save_settings(self, *_):
+    @patch("bookwyrm.connectors.readwise.ReadwiseClient.validate_token")
+    def test_readwise_save_settings(self, mock_validate_token, *_):
         """Test saving Readwise settings"""
-        request = self.factory.post(
-            "",
+        mock_validate_token.return_value = True
+        request = self._request(
+            "post",
             {
                 "readwise_token": "new_test_token",
                 "readwise_auto_export": True,
             },
         )
-        request.user = self.local_user
 
         result = views.ReadwiseSettings.as_view()(request)
 
@@ -129,8 +140,7 @@ class ReadwiseSettingsViewTest(TestCase):
 
     def test_readwise_export_without_token(self, *_):
         """Test export action without token fails gracefully"""
-        request = self.factory.post("", {"action": "export"})
-        request.user = self.local_user
+        request = self._request("post", {"action": "export"})
 
         result = views.ReadwiseSettings.as_view()(request)
 
@@ -143,8 +153,7 @@ class ReadwiseSettingsViewTest(TestCase):
         self.local_user.readwise_token = "test_token"
         self.local_user.save()
 
-        request = self.factory.post("", {"action": "export"})
-        request.user = self.local_user
+        request = self._request("post", {"action": "export"})
 
         # Use transaction.on_commit callback
 
@@ -160,8 +169,7 @@ class ReadwiseSettingsViewTest(TestCase):
 
     def test_readwise_import_without_token(self, *_):
         """Test import action without token fails gracefully"""
-        request = self.factory.post("", {"action": "import"})
-        request.user = self.local_user
+        request = self._request("post", {"action": "import"})
 
         result = views.ReadwiseSettings.as_view()(request)
 
@@ -174,8 +182,7 @@ class ReadwiseSettingsViewTest(TestCase):
         self.local_user.readwise_token = "test_token"
         self.local_user.save()
 
-        request = self.factory.post("", {"action": "import"})
-        request.user = self.local_user
+        request = self._request("post", {"action": "import"})
 
         # Use transaction.on_commit callback
         with self.captureOnCommitCallbacks(execute=True):

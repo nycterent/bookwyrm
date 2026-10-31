@@ -16,7 +16,7 @@
     <div class="notification is-info is-light">
         <p>
             {% blocktrans %}
-            Connect your BookWyrm account with <a href="https://readwise.io" target="_blank" rel="noopener">Readwise</a> to sync your book highlights.
+            Connect your BookWyrm account with <a href="https://readwise.io" target="_blank" rel="nofollow noopener noreferrer">Readwise</a> to sync your book highlights.
             Export your BookWyrm quotes to Readwise for spaced repetition review, or import your Readwise highlights as quotes.
             {% endblocktrans %}
         </p>
@@ -33,7 +33,7 @@
                 {{ form.readwise_token }}
                 <p class="help" id="desc_readwise_token">
                     {% blocktrans %}
-                    Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="noopener">readwise.io/access_token</a>
+                    Get your token from <a href="https://readwise.io/access_token" target="_blank" rel="nofollow noopener noreferrer">readwise.io/access_token</a>
                     {% endblocktrans %}
                 </p>
                 {% include 'snippets/form_errors.html' with errors_list=form.readwise_token.errors id="desc_readwise_token_errors" %}
