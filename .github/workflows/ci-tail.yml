@@ -43,13 +43,16 @@ jobs:
       - run: cp .env.example .env
       - run: python ./manage.py compile_themes
       - run: python ./manage.py collectstatic --no-input
-      - name: pytest and surface the tail
+      - name: pytest and surface the summary
         run: |
           set +e
           pytest -n 3 -q > /tmp/p.log 2>&1
           code=$?
           echo "pytest exited $code"
           echo "::error title=pytest-exit::$code"
-          tail -n 12 /tmp/p.log | while IFS= read -r line; do
-            echo "::error title=tail::${line}"
+          grep -E "^(FAILED|ERROR)" /tmp/p.log | head -n 8 | while IFS= read -r line; do
+            echo "::error title=failed::${line}"
+          done
+          grep -nE "INTERNALERROR|worker .* crashed|Traceback|No tests ran|error" /tmp/p.log | head -n 3 | while IFS= read -r line; do
+            echo "::error title=diagnostic::${line}"
           done
