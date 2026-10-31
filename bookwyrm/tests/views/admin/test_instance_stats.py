@@ -116,6 +116,8 @@ class InstanceStatsFunctionsTest(TestCase):
 
     def test_get_activity_stats(self):
         """Test activity stats function returns expected structure"""
+        import json
+
         from django.utils import timezone
         from bookwyrm.views.admin.instance_stats import get_activity_stats
 
@@ -127,8 +129,9 @@ class InstanceStatsFunctionsTest(TestCase):
         self.assertIn("status_by_day", activity)
         self.assertIn("quotes_by_day", activity)
         self.assertIn("servers_by_day", activity)
-        self.assertEqual(len(activity["labels"]), 7)
-        self.assertEqual(len(activity["status_by_day"]), 7)
+        # the series are JSON-encoded for the JavaScript chart
+        self.assertEqual(len(json.loads(activity["labels"])), 7)
+        self.assertEqual(len(json.loads(activity["status_by_day"])), 7)
 
     def test_get_connector_stats(self):
         """Test connector stats function returns expected structure"""

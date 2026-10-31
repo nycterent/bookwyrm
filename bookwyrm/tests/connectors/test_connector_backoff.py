@@ -165,6 +165,10 @@ class TestConnectorBackoff(TestCase):
         for _ in range(4):
             ConnectorBackoff.record_failure(self.connector_id, "error")
 
+        # being in backoff also reports unavailable, so clear that state to
+        # isolate the success-rate threshold this test covers
+        cache.delete(ConnectorBackoff._get_cache_key(self.connector_id))
+
         stats = ConnectorBackoff.get_health_stats(self.connector_id)
         # 7/11 = 63.6% < 70% = degraded
         self.assertEqual(stats["health_status"], "degraded")

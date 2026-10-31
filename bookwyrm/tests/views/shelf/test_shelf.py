@@ -508,7 +508,11 @@ class ShelfViews(TestCase):
         request.user = self.local_user
         with patch("bookwyrm.views.shelf.shelf.is_api_request") as is_api:
             is_api.return_value = False
-            result = view(request, "nutria@example.com", remote_shelf.identifier)
+            result = view(
+                request,
+                username="nutria@example.com",
+                shelf_identifier=remote_shelf.identifier,
+            )
 
         self.assertIsInstance(result, TemplateResponse)
         # Render the template to verify it doesn't error on URL generation

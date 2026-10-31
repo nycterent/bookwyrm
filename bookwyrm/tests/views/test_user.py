@@ -237,7 +237,7 @@ class UserViews(TestCase):
         request.user = self.local_user
         with patch("bookwyrm.views.user.is_api_request") as is_api:
             is_api.return_value = False
-            result = view(request, "mouse")
+            result = view(request, username="mouse")
 
         self.assertIsInstance(result, TemplateResponse)
         self.assertEqual(result.status_code, 200)
@@ -279,7 +279,7 @@ class UserViews(TestCase):
         request.user = self.local_user
         with patch("bookwyrm.views.user.is_api_request") as is_api:
             is_api.return_value = False
-            result = view(request, "nutria@example.com")
+            result = view(request, username="nutria@example.com")
 
         self.assertIsInstance(result, TemplateResponse)
         self.assertEqual(result.status_code, 200)
