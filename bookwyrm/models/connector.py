@@ -6,7 +6,7 @@ from django.db import models
 from django.utils import timezone
 from bookwyrm.connectors.settings import CONNECTORS
 
-from .base_model import BookWyrmModel, DeactivationReason
+from .base_model import BookWyrmModel, DEACTIVATION_REASONS
 
 
 ConnectorFiles = models.TextChoices("ConnectorFiles", CONNECTORS)
@@ -30,8 +30,11 @@ class Connector(BookWyrmModel):
     api_key = models.CharField(max_length=255, null=True, blank=True)
     active = models.BooleanField(default=True)
     deactivation_reason = models.CharField(
-        max_length=255, choices=DeactivationReason, null=True, blank=True
+        max_length=255, choices=DEACTIVATION_REASONS, null=True, blank=True
     )
+    most_recent_success = models.DateTimeField(null=True)
+    most_recent_error = models.DateTimeField(null=True)
+    latest_error = models.CharField(max_length=255, null=True, blank=True)
 
     base_url = models.CharField(max_length=255)
     books_url = models.CharField(max_length=255)

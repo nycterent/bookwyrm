@@ -1,12 +1,13 @@
 """test for app action functionality"""
 
-import json
+import re
 from unittest.mock import patch
 import dateutil
 from django.core.exceptions import PermissionDenied
 from django.test import TestCase, TransactionTestCase
 from django.test.client import RequestFactory
 from django.utils import timezone
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from bookwyrm import forms, models, views
 from bookwyrm.views.status import find_mentions, find_or_create_hashtags
@@ -74,7 +75,7 @@ class StatusTransactions(TransactionTestCase):
 @patch("bookwyrm.activitystreams.populate_stream_task.delay")
 @patch("bookwyrm.lists_stream.populate_lists_task.delay")
 @patch("bookwyrm.activitystreams.remove_status_task.delay")
-@patch("bookwyrm.models.activitypub_mixin.broadcast_task.apply_async")
+@patch("bookwyrm.models.activitypub_mixin.ActivitypubMixin.broadcast")
 class StatusViews(TestCase):
     """viewing and creating statuses"""
 
@@ -146,6 +147,29 @@ class StatusViews(TestCase):
         self.assertEqual(status.book, self.book)
         self.assertIsNone(status.edited_date)
 
+    def test_create_status_quotation_syncs_readwise(self, *_):
+        """create a quote and enqueue Readwise sync"""
+        self.local_user.readwise_api_key = "readwise-token"
+        self.local_user.save(broadcast=False, update_fields=["readwise_api_key"])
+        view = views.CreateStatus.as_view()
+        form = forms.QuotationForm(
+            {
+                "quote": "a quotable bit",
+                "content": "a note",
+                "user": self.local_user.id,
+                "book": self.book.id,
+                "privacy": "public",
+            }
+        )
+        request = self.factory.post("", form.data)
+        request.user = self.local_user
+
+        with patch("bookwyrm.views.status.sync_readwise_quotation.delay") as task_mock:
+            view(request, "quotation")
+
+        status = models.Quotation.objects.get()
+        task_mock.assert_called_once_with(status.id)
+
     def test_create_status_rating(self, *_):
         """create a status"""
         view = views.CreateStatus.as_view()
@@ -214,6 +238,58 @@ class StatusViews(TestCase):
         request.user = self.local_user
         with self.assertRaises(PermissionDenied):
             view(request, "comment")
+
+    def test_create_status_uploads(self, *_):
+        """status with an uploaded image"""
+        view = views.CreateStatus.as_view()
+        user = self.local_user
+
+        fake_file_title = "foo"
+        fake_file_extension = ".jpg"
+        fake_filename = f"{fake_file_title}{fake_file_extension}"
+        fake_file_dimension = "240"
+
+        fake_file = SimpleUploadedFile(fake_filename, b"a")
+        upload = models.UserUpload.objects.create(
+            original_name=fake_filename, original_file=fake_file, user=user
+        )
+        models.UserUploadVersion.objects.create(
+            user_upload=upload,
+            max_dimension=fake_file_dimension,
+            file=fake_file,
+        )
+        img_path = upload.original_file.name
+        form = forms.CommentForm(
+            {
+                "content": f"pic !image({img_path})",
+                "user": self.local_user.id,
+                "book": self.book.id,
+                "privacy": "public",
+            }
+        )
+        request = self.factory.post("", form.data)
+        request.user = user
+
+        view(request, "comment")
+
+        status = models.Status.objects.get()
+        self.assertEqual(list(status.user_image_uploads.all()), [upload])
+        # rendered view contains an image tag
+        self.assertRegex(status.content, "<p>pic <img.*></p>")
+
+        # rendered srcset is a strict subset of rendered src
+        matches = re.findall(
+            rf'srcset="(.*?) {fake_file_dimension}w".*src="(\1)"', status.content
+        )
+        rendered_srcset, rendered_src = matches[0]
+        self.assertIsNotNone(rendered_srcset)
+        self.assertIsNotNone(rendered_src)
+
+        # rendered src ends in the filename max_dimension with an extension that matches the original
+        self.assertRegex(
+            rendered_src,
+            rf"{fake_file_dimension}(?:_[A-Za-z0-9]*)?\{fake_file_extension}$",
+        )
 
     def test_create_status_reply(self, *_):
         """create a status in reply to an existing status"""
@@ -438,6 +514,37 @@ class StatusViews(TestCase):
         hashtag = models.Hashtag.objects.filter(name="#ひぐま").first()
         self.assertEqual(result["#ひぐま"], hashtag)
 
+    def test_format_image_helper(self, *_):
+        """find and format images into tags"""
+        fake_file = SimpleUploadedFile("foo.jpg", b"a")
+        user = self.local_user
+        lower_resolution_dimension = "240"
+        high_resolution_dimension = "600"
+        upload = models.UserUpload.objects.create(
+            original_name="foo.jpg", original_file=fake_file, user=self.local_user
+        )
+        models.UserUploadVersion.objects.create(
+            user_upload=upload,
+            max_dimension=lower_resolution_dimension,
+            file=fake_file,
+        )
+        models.UserUploadVersion.objects.create(
+            user_upload=upload,
+            max_dimension=high_resolution_dimension,
+            file=fake_file,
+        )
+        img_path = upload.original_file.name
+        text = f"!image({img_path})"
+        rendered_image_tag = views.status.format_images(
+            text, views.status.find_images(text, self.local_user)
+        )
+        lower_resolution_regex = rf"/.*?user_{user.id}/{upload.id}/{lower_resolution_dimension}(?:_[a-zA-Z0-9]*)?(.jpg)"
+        high_resolution_regex = rf".*?user_{user.id}/{upload.id}/{high_resolution_dimension}(?:_[a-zA-Z0-9]*)?(.jpg)"
+        self.assertRegex(
+            rendered_image_tag,
+            rf'<img srcset="{lower_resolution_regex} {lower_resolution_dimension}w, {high_resolution_regex} {high_resolution_dimension}w" sizes="\(width <= {high_resolution_dimension}px\) 100vw, 60vw" src="{high_resolution_regex}" />',
+        )
+
     def test_format_links_simple_url(self, *_):
         """find and format urls into a tags"""
         url = "http://www.fish.com/"
@@ -568,7 +675,7 @@ http://www.fish.com/"""
         with patch("bookwyrm.activitystreams.remove_status_task.delay") as redis_mock:
             view(request, status.id)
             self.assertTrue(redis_mock.called)
-        activity = json.loads(mock.call_args_list[1][1]["args"][1])
+        activity = mock.call_args_list[1][0][0]
         self.assertEqual(activity["type"], "Delete")
         self.assertEqual(activity["object"]["type"], "Tombstone")
         status.refresh_from_db()
@@ -602,9 +709,39 @@ http://www.fish.com/"""
         with patch("bookwyrm.activitystreams.remove_status_task.delay") as redis_mock:
             view(request, status.id)
             self.assertTrue(redis_mock.called)
-        activity = json.loads(mock.call_args_list[1][1]["args"][1])
+        activity = mock.call_args_list[1][0][0]
         self.assertEqual(activity["type"], "Delete")
         self.assertEqual(activity["object"]["type"], "Tombstone")
+        status.refresh_from_db()
+        self.assertTrue(status.deleted)
+
+    def test_delete_status_redirects_to_book(self, *_):
+        """deleting from the status page redirects to the book page"""
+        with patch("bookwyrm.activitystreams.add_status_task.delay"):
+            status = models.Comment.objects.create(
+                content="status", user=self.local_user, book=self.book
+            )
+        referer = "https://example.com" + status.local_path
+        request = self.factory.post("", HTTP_REFERER=referer)
+        request.user = self.local_user
+        view = views.DeleteStatus.as_view()
+        response = view(request, status.id)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, self.book.local_path)
+        status.refresh_from_db()
+        self.assertTrue(status.deleted)
+
+    def test_delete_status_redirects_to_user(self, *_):
+        """deleting from the status page with no associated book redirects to the user page"""
+        with patch("bookwyrm.activitystreams.add_status_task.delay"):
+            status = models.Status.objects.create(user=self.local_user, content="hi")
+        referer = "https://example.com" + status.local_path
+        request = self.factory.post("", HTTP_REFERER=referer)
+        request.user = self.local_user
+        view = views.DeleteStatus.as_view()
+        response = view(request, status.id)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, self.local_user.local_path)
         status.refresh_from_db()
         self.assertTrue(status.deleted)
 
@@ -654,7 +791,7 @@ http://www.fish.com/"""
         request.user = self.local_user
 
         view(request, "comment", existing_status_id=status.id)
-        activity = json.loads(mock.call_args_list[1][1]["args"][1])
+        activity = mock.call_args_list[1][0][0]
         self.assertEqual(activity["type"], "Update")
         self.assertEqual(activity["object"]["id"], status.remote_id)
 

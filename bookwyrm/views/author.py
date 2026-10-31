@@ -2,12 +2,15 @@
 
 from django.contrib.auth.decorators import login_required, permission_required
 from django.core.paginator import Paginator
+from django.db.models import Min, Q
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_POST
 from django.views.decorators.vary import vary_on_headers
+from django_celery_beat.models import PeriodicTask
 
 from bookwyrm import forms, models
 from bookwyrm.activitypub import ActivitypubResponse
@@ -17,16 +20,20 @@ from bookwyrm.views.helpers import (
     is_api_request,
     get_mergeable_object_or_404,
     maybe_redirect_local_path,
+    search_within_queryset,
 )
+from bookwyrm.views.mixins import MergeableViewMixin
 
 
-class Author(View):
+class Author(MergeableViewMixin, View):
     """this person wrote a book"""
 
+    merge_model = models.Author
+
     @vary_on_headers("Accept")
-    def get(self, request, author_id, slug=None):
+    def get(self, request, mergeable_object_id, slug=None):
         """landing page for an author"""
-        author = get_mergeable_object_or_404(models.Author, id=author_id)
+        author = get_mergeable_object_or_404(models.Author, id=mergeable_object_id)
 
         if is_api_request(request):
             return ActivitypubResponse(author.to_activity())
@@ -34,11 +41,42 @@ class Author(View):
         if redirect_local_path := maybe_redirect_local_path(request, author):
             return redirect_local_path
 
-        books = (
+        blocked_books = (
+            request.user.blocked_books.values_list("id", flat=True)
+            if request.user.is_authenticated
+            else []
+        )
+        works = (
             models.Work.objects.filter(editions__authors=author)
-            .order_by("created_date")
+            .exclude(id__in=blocked_books)
+            .annotate(
+                sort_date=Coalesce(
+                    "first_published_date",
+                    "published_date",
+                    Min("editions__first_published_date"),
+                    Min("editions__published_date"),
+                )
+            )
+            .order_by("-sort_date")
             .distinct()
         )
+
+        if query := request.GET.get("q"):
+            works = search_within_queryset(
+                works,
+                query,
+                searchable_fields=[
+                    "title",
+                    "isfdb",
+                    "lccn",
+                ],
+            )
+
+        if filter_series := request.GET.get("series"):
+            works = works.filter(
+                Q(seriesbooks__series=filter_series)
+                | Q(editions__seriesbooks__series=filter_series)
+            )
 
         series = (
             models.Series.objects.filter(seriesbooks__book__authors=author)
@@ -46,12 +84,16 @@ class Author(View):
             .distinct()
         )
 
-        paginated = Paginator(books, PAGE_LENGTH)
+        paginated = Paginator(works, PAGE_LENGTH)
         page = paginated.get_page(request.GET.get("page"))
+
+        merge_scheduled = PeriodicTask.objects.filter(name="dedupe-merge-task").exists()
         data = {
             "author": author,
+            "author_dupe": author.pending_merge_target,
+            "merge_scheduled": merge_scheduled,
             "series": series,
-            "books": page,
+            "works": page,
             "page_range": paginated.get_elided_page_range(
                 page.number, on_each_side=2, on_ends=1
             ),

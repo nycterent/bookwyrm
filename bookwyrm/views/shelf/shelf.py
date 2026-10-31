@@ -1,6 +1,7 @@
 """shelf views"""
 
 from collections import namedtuple
+import re
 
 from django.db.models import OuterRef, Subquery, F, Max
 from django.contrib.auth.decorators import login_required
@@ -16,17 +17,18 @@ from django.views.decorators.vary import vary_on_headers
 from bookwyrm import forms, models
 from bookwyrm.activitypub import ActivitypubResponse
 from bookwyrm.settings import PAGE_LENGTH
-from bookwyrm.views.helpers import is_api_request, get_user_from_username
+from bookwyrm.views.helpers import is_api_request
 from bookwyrm.book_search import search
+from bookwyrm.views.mixins import PrivateProfileMixin
 
 
-class Shelf(View):
+class Shelf(PrivateProfileMixin, View):
     """shelf page"""
 
     @vary_on_headers("Accept")
     def get(self, request, username, shelf_identifier=None):
         """display a shelf"""
-        user = get_user_from_username(request.user, username)
+        user = request.profile_user
 
         is_self = user == request.user
 
@@ -79,19 +81,25 @@ class Shelf(View):
             "start_date"
         )
 
-        books = books.annotate(shelved_date=Max("shelfbook__shelved_date"))
+        # don't annotate on every possible sort field
+        sort = request.GET.get("sort") or "-shelved_date"
+
         books = books.annotate(
             rating=Subquery(reviews.values("rating")[:1]),
             start_date=Subquery(reading.values("start_date")[:1]),
             finish_date=Subquery(reading.values("finish_date")[:1]),
-            author=Subquery(
-                models.Book.objects.filter(id=OuterRef("id")).values("authors__name")[
-                    :1
-                ]
-            ),
-        ).prefetch_related("authors")
+            shelved_date=Max("shelfbook__shelved_date"),
+        )
+        if re.match(r"^-?author$", sort):
+            books = books.annotate(
+                author=models.Book.objects.filter(id=OuterRef("id")).values(
+                    "authors__name"
+                )[:1]
+            )
 
-        books = sort_books(books, request.GET.get("sort"))
+        books = books.prefetch_related("authors")
+
+        books = sort_books(books, sort)
 
         if shelves_filter_query:
             books = search(shelves_filter_query, books=books)
@@ -109,7 +117,7 @@ class Shelf(View):
             "books": page,
             "edit_form": forms.ShelfForm(instance=shelf if shelf_identifier else None),
             "create_form": forms.ShelfForm(),
-            "sort": request.GET.get("sort"),
+            "sort": sort,
             "page_range": paginated.get_elided_page_range(
                 page.number, on_each_side=2, on_ends=1
             ),
@@ -122,8 +130,7 @@ class Shelf(View):
     @method_decorator(login_required, name="dispatch")
     def post(self, request, username, shelf_identifier):
         """edit a shelf"""
-        user = get_user_from_username(request.user, username)
-        shelf = get_object_or_404(user.shelf_set, identifier=shelf_identifier)
+        shelf = get_object_or_404(request.user.shelf_set, identifier=shelf_identifier)
 
         # you can't change the name of the default shelves
         if not shelf.editable and request.POST.get("name") != shelf.name:

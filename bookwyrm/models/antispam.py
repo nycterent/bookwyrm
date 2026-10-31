@@ -13,6 +13,7 @@ from bookwyrm.tasks import app, MISC
 from .base_model import BookWyrmModel
 from .notification import NotificationType
 from .user import User
+from .report import Report
 
 
 class AdminModel(BookWyrmModel):
@@ -23,7 +24,7 @@ class AdminModel(BookWyrmModel):
 
         abstract = True
 
-    def raise_not_editable(self, viewer):
+    def raise_not_editable(self, viewer: User):
         if viewer.has_perm("bookwyrm.moderate_user"):
             return
         raise PermissionDenied()
@@ -68,7 +69,7 @@ class AutoMod(AdminModel):
 
 
 @app.task(queue=MISC)
-def automod_task():
+def automod_task() -> None:
     """Create reports"""
     if not AutoMod.objects.exists():
         return
@@ -87,7 +88,7 @@ def automod_task():
             notification.related_reports.set(reports)
 
 
-def automod_users(reporter):
+def automod_users(reporter: User) -> list[Report]:
     """check users for moderation flags"""
     user_rules = AutoMod.objects.filter(flag_users=True).values_list(
         "string_match", flat=True
@@ -102,7 +103,7 @@ def automod_users(reporter):
         reduce(operator.or_, (Q(**f) for f in filters)),
         is_active=True,
         local=True,
-        report__isnull=True,  # don't flag users that already have reports
+        reported_user__isnull=True,  # don't flag users that already have reports
     ).distinct()
 
     report_model = apps.get_model("bookwyrm", "Report", require_ready=True)
@@ -110,16 +111,16 @@ def automod_users(reporter):
     return report_model.objects.bulk_create(
         [
             report_model(
-                reporter=reporter,
+                user=reporter,
                 note=_("Automatically generated report"),
-                user=u,
+                reported_user=u,
             )
             for u in users
         ]
     )
 
 
-def automod_statuses(reporter):
+def automod_statuses(reporter: User) -> list[Report]:
     """check statues for moderation flags"""
     status_rules = AutoMod.objects.filter(flag_statuses=True).values_list(
         "string_match", flat=True
@@ -141,14 +142,14 @@ def automod_statuses(reporter):
     ).distinct()
 
     report_model = apps.get_model("bookwyrm", "Report", require_ready=True)
-    return report_model.objects.bulk_create(
-        [
-            report_model(
-                reporter=reporter,
+    reports = []
+    for status in statuses:
+        with transaction.atomic():
+            report = report_model.objects.create(
+                user=reporter,
                 note=_("Automatically generated report"),
-                user=s.user,
-                status=s,
+                reported_user=status.user,
             )
-            for s in statuses
-        ]
-    )
+            report.statuses.add(status)
+            reports.append(report)
+    return reports

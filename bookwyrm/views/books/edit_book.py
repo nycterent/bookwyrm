@@ -1,6 +1,6 @@
 """the good stuff! the books!"""
 
-from re import sub, findall
+from re import findall
 
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.postgres.search import SearchRank, SearchVector
@@ -24,9 +24,9 @@ from bookwyrm.utils.images import remove_uploaded_image_exif, set_cover_from_url
 from bookwyrm.utils.isni import (
     find_authors_by_name,
     build_author_from_isni,
-    augment_author_metadata,
+    augment_author_aliases,
 )
-from bookwyrm.views.helpers import get_edition, get_mergeable_object_or_404
+from bookwyrm.views.helpers import get_mergeable_object_or_404
 
 
 @method_decorator(login_required, name="dispatch")
@@ -38,29 +38,39 @@ class EditBook(View):
 
     def get(self, request, book_id):
         """info about a book"""
-        book = get_edition(book_id)
-        seriesbooks = book.parent_work.seriesbooks.all()
+        book = models.Book.objects.select_subclasses().get(id=book_id)
+        is_work = isinstance(book, models.Work)
+        seriesbooks = (
+            book.seriesbooks.all() if is_work else book.parent_work.seriesbooks.all()
+        )
         # This doesn't update the sort title, just pre-populates it in the form
         if book.sort_title in ["", None]:
             book.sort_title = book.guess_sort_title(user=request.user)
-        if not book.description:
+        if not book.description and hasattr(book, "parent_work"):
             book.description = book.parent_work.description
+        form = forms.WorkForm if is_work else forms.EditionForm
         data = {
             "book": book,
+            "model": "work" if is_work else "edition",
             "seriesbooks": seriesbooks,
-            "form": forms.EditionForm(instance=book),
+            "form": form(instance=book),
         }
         return TemplateResponse(request, "book/edit/edit_book.html", data)
 
     def post(self, request, book_id):
         """edit a book cool"""
-        book = get_mergeable_object_or_404(models.Edition, id=book_id)
 
-        form = forms.EditionForm(request.POST, request.FILES, instance=book)
+        book = models.Book.objects.select_subclasses().get(id=book_id)
+        is_work = isinstance(book, models.Work)
 
-        data = {"book": book, "form": form}
+        form = forms.WorkForm if is_work else forms.EditionForm
+        form = form(request.POST, request.FILES, instance=book)
+
+        data = {"book": book, "form": form, "model": "work" if is_work else "edition"}
         ensure_transient_values_persist(request, data)
         if not form.is_valid():
+            if "cover" in form.errors and form.has_error("cover", "invalid_image"):
+                del data["form"].files["cover"]
             ensure_transient_values_persist(request, data, add_author=True)
             return TemplateResponse(request, "book/edit/edit_book.html", data)
 
@@ -68,7 +78,10 @@ class EditBook(View):
         data = add_or_remove_series(request, data)
 
         series_errors = []
-        for sb in book.parent_work.seriesbooks.all():
+        seriesbooks = (
+            book.seriesbooks.all() if is_work else book.parent_work.seriesbooks.all()
+        )
+        for sb in seriesbooks:
             if value := request.POST.get(f"series_number-{sb.id}"):
                 try:
                     sb.series_number = value
@@ -116,6 +129,9 @@ class EditBook(View):
             book.cover = remove_uploaded_image_exif(form.files["cover"])
 
         book.save()
+
+        if is_work:
+            return redirect(f"/book/{book.id}/editions")
         return redirect(f"/book/{book.id}")
 
 
@@ -128,14 +144,13 @@ class CreateBook(View):
 
     def get(self, request):
         """info about a book"""
-        data = {"form": forms.EditionForm()}
+        data = {"form": forms.EditionForm(), "model": "edition"}
         return TemplateResponse(request, "book/edit/edit_book.html", data)
 
     def post(self, request):
         """create a new book"""
-        # returns None if no match is found
         form = forms.EditionForm(request.POST, request.FILES)
-        data = {"form": form}
+        data = {"form": form, "model": "edition"}
 
         # collect data provided by the work or import item
         parent_work_id = request.POST.get("parent_work")
@@ -152,6 +167,8 @@ class CreateBook(View):
             }
 
         if not form.is_valid():
+            if "cover" in form.errors and form.has_error("cover", "invalid_image"):
+                del data["form"].files["cover"]
             ensure_transient_values_persist(request, data, form=form)
             return TemplateResponse(request, "book/edit/edit_book.html", data)
 
@@ -229,7 +246,6 @@ def add_or_remove_authors(request, data):
 
     data["add_author"] = add_author
     data["author_matches"] = []
-    data["isni_matches"] = []
 
     # creating a book or adding an author to a book needs another step
     data["confirm_mode"] = True
@@ -244,33 +260,28 @@ def add_or_remove_authors(request, data):
         author_matches = (
             models.Author.objects.annotate(search=vector)
             .annotate(rank=SearchRank(vector, author, normalization=32))
+            .exclude(book=None)  # exclude authors with no books
             .filter(rank__gt=0.19)  # short alias names like XY get rank around 0.1956
             .order_by("-rank")[:5]
         )
 
-        isni_authors = find_authors_by_name(
+        isni_matches = find_authors_by_name(
             author, description=True
-        )  # find matches from ISNI API
+        )  # find matches from ISNI API by name
 
-        # dedupe isni authors we already have in the DB
-        exists = [
-            i
-            for i in isni_authors
-            for a in author_matches
-            if sub(r"\D", "", str(i.isni)) == sub(r"\D", "", str(a.isni))
-        ]
-
-        matches = list(filter(lambda x: x not in exists, isni_authors))
-        # combine existing and isni authors
-        matches.extend(author_matches)
-
-        data["author_matches"].append(
-            {
-                "name": author.strip(),
-                "matches": matches,
-                "existing_isnis": exists,
-            }
+        # dedupe against existing authors
+        unmatched_isni_authors = list(
+            filter(
+                lambda i: i.isni not in author_matches.values_list("isni", flat=True),
+                isni_matches,
+            )
         )
+        # append to local authors
+        author_list = list(author_matches)
+        author_list.extend(unmatched_isni_authors if author_matches else isni_matches)
+
+        # dict for this add_author
+        data["author_matches"].append({"name": author.strip(), "matches": author_list})
     return data
 
 
@@ -320,7 +331,7 @@ def create_book_from_data(request):
         "subjects": request.POST.getlist("subjects"),
     }
 
-    data = {"book": book, "form": forms.EditionForm(request.POST)}
+    data = {"book": book, "model": "edition", "form": forms.EditionForm(request.POST)}
     return TemplateResponse(request, "book/edit/edit_book.html", data)
 
 
@@ -334,10 +345,15 @@ class ConfirmEditBook(View):
     def post(self, request, book_id=None):
         """edit a book cool"""
         # returns None if no match is found
-        book = models.Edition.objects.filter(id=book_id).first()
-        form = forms.EditionForm(request.POST, request.FILES, instance=book)
+        book = (
+            models.Book.objects.select_subclasses().get(id=book_id) if book_id else None
+        )
+        # if the book id is not set, we're creating a new edition
+        is_work = isinstance(book, models.Work) if book else False
+        form = forms.WorkForm if is_work else forms.EditionForm
+        form = form(request.POST, request.FILES, instance=book)
 
-        data = {"book": book, "form": form}
+        data = {"book": book, "form": form, "model": "work" if is_work else "edition"}
         if not form.is_valid():
             return TemplateResponse(request, "book/edit/edit_book.html", data)
 
@@ -363,29 +379,24 @@ class ConfirmEditBook(View):
                     author = get_object_or_404(
                         models.Author, id=request.POST[f"author_match-{i}"]
                     )
-                    # update author metadata if the ISNI record is more complete
-                    isni = request.POST.get(f"isni-for-{match}", None)
-                    if isni is not None:
-                        augment_author_metadata(author, isni)
+                    # update author aliases if the ISNI record is more complete
+                    if author.isni and not author.aliases:
+                        augment_author_aliases(author, author.isni)
                 except ValueError:
                     # otherwise it's a new author
+
+                    # if we have an ISNI match, use that as starter data
                     isni_match = request.POST.get(f"author_match-{i}")
                     author_object = build_author_from_isni(isni_match)
-                    # with author data class from isni id
-                    if "author" in author_object:
-                        skeleton = models.Author.objects.create(
-                            name=author_object["author"].name
-                        )
-                        author = author_object["author"].to_model(
-                            model=models.Author, overwrite=True, instance=skeleton
-                        )
+                    if author_object:
+                        author = author_object.to_model(model=models.Author)
                     else:
                         # or it's just a name
                         author = models.Author.objects.create(name=match)
                 book.authors.add(author)
 
             # create work, if needed
-            if not book.parent_work:
+            if not is_work and not book.parent_work:
                 work_match = request.POST.get("parent_work")
                 if work_match and work_match != "0":
                     work = get_mergeable_object_or_404(models.Work, id=work_match)
@@ -404,7 +415,7 @@ class ConfirmEditBook(View):
                     series = models.Series.objects.get(id=int(series_match))
                     models.SeriesBook.objects.get_or_create(
                         series=series,
-                        book=book.parent_work,
+                        book=book if is_work else book.parent_work,
                         defaults={
                             "series_number": book.series_number,
                             "user": user,
@@ -443,11 +454,11 @@ class ConfirmEditBook(View):
                             )
 
                     # Ok it really is a new series
-                    series = models.Series.objects.create(user=user, name=book.series)
+                    series = models.Series.objects.create(name=book.series)
                     models.SeriesBook.objects.create(
                         user=user,
                         series=series,
-                        book=book.parent_work,
+                        book=book if is_work else book.parent_work,
                         series_number=book.series_number,
                     )
 
@@ -455,11 +466,11 @@ class ConfirmEditBook(View):
 
             elif book.series:
                 # doesn't look like any existing series
-                series = models.Series.objects.create(user=user, name=book.series)
+                series = models.Series.objects.create(name=book.series)
                 models.SeriesBook.objects.create(
                     user=user,
                     series=series,
-                    book=book.parent_work,
+                    book=book if is_work else book.parent_work,
                     series_number=book.series_number,
                 )
 
@@ -473,7 +484,12 @@ class ConfirmEditBook(View):
                     seriesbook.delete()
 
             series_errors = []
-            for sb in book.parent_work.seriesbooks.all():
+            series_books = (
+                book.seriesbooks.all()
+                if is_work
+                else book.parent_work.seriesbooks.all()
+            )
+            for sb in series_books:
                 if value := request.POST.get(f"series_number-{sb.id}"):
                     try:
                         sb.series_number = value
@@ -507,4 +523,6 @@ class ConfirmEditBook(View):
             # we don't tell the world when creating a book
             book.save(broadcast=False)
 
+        if is_work:
+            return redirect(f"/book/{book.id}/editions")
         return redirect(f"/book/{book.id}")

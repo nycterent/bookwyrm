@@ -1,7 +1,6 @@
 """template filters for really common utilities"""
 
 import os
-import re
 from uuid import uuid4
 from urllib.parse import urlparse
 from django import template
@@ -10,7 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from django.templatetags.static import static
 
 from bookwyrm.models import User
-from bookwyrm.settings import INSTANCE_ACTOR_USERNAME
+from bookwyrm.settings import INSTANCE_ACTOR_USERNAME, DATA_UPLOAD_MAX_MEMORY_SIZE
 
 register = template.Library()
 
@@ -27,10 +26,35 @@ def join(*args):
     return "_".join(str(a) for a in args)
 
 
+@register.filter(name="getattr_filter")
+def getattr_filter(object, arg):
+    """get attribute value from an object"""
+
+    if object.__class__._meta.get_field(arg).get_internal_type() == "ArrayField":
+        return getattr(object, arg, [])
+    if object.__class__._meta.get_field(arg).get_internal_type() == "DateTimeField":
+        if getattr(object, arg) is not None:
+            return getattr(object, arg, "").strftime("%Y-%m-%d")
+        return ""
+
+    return getattr(object, arg, "") or ""
+
+
 @register.filter(name="username")
 def get_user_identifier(user):
     """use localname for local users, username for remote"""
     return user.localname if user.localname else user.username
+
+
+@register.filter(is_safe=True)
+@register.filter(name="user_link")
+def get_link_to_user(user):
+    """get a link to a user profile, or display if the user has been deleted"""
+    username = user.display_name
+    if user.is_active:
+        return mark_safe(f'<a href="{user.local_path}">{username}</a>')
+    text = _("deactivated user")
+    return mark_safe(f"<em class='tag'>{text}</em>")
 
 
 @register.filter(name="user_from_remote_id")
@@ -89,19 +113,6 @@ def get_book_cover_thumbnail(book, size="medium", ext="jpg"):
         return static("images/no_cover.jpg")
 
 
-@register.filter(name="get_isni_bio")
-def get_isni_bio(existing, author):
-    """Returns the isni bio string if an existing author has an isni listed"""
-    auth_isni = re.sub(r"\D", "", str(author.isni))
-    if len(existing) == 0:
-        return ""
-    for value in existing:
-        if hasattr(value, "bio") and auth_isni == re.sub(r"\D", "", str(value.isni)):
-            return mark_safe(f"Author of <em>{value.bio}</em>")
-
-    return ""
-
-
 @register.filter(name="possible_series_hint")
 def possible_series_hint(seriesbook):
     """Returns the hint string for a possible matching series"""
@@ -118,21 +129,6 @@ def possible_series_hint(seriesbook):
         hint += f" by {author}"
 
     return mark_safe(hint)
-
-
-@register.filter(name="get_isni", needs_autoescape=True)
-def get_isni(existing, author, autoescape=True):
-    """Returns the isni ID if an existing author has an ISNI listing"""
-    auth_isni = re.sub(r"\D", "", str(author.isni))
-    if len(existing) == 0:
-        return ""
-    for value in existing:
-        if hasattr(value, "isni") and auth_isni == re.sub(r"\D", "", str(value.isni)):
-            isni = value.isni
-            return mark_safe(
-                f'<input type="text" name="isni-for-{author.id}" value="{isni}" hidden>'
-            )
-    return ""
 
 
 @register.simple_tag(takes_context=False)
@@ -171,14 +167,36 @@ def get_file_size(nbytes):
     return f"{raw_size / 1024**3:.2f} GB"
 
 
+@register.simple_tag(takes_context=False)
+def max_upload_size():
+    return DATA_UPLOAD_MAX_MEMORY_SIZE
+
+
+@register.simple_tag(takes_context=False)
+def max_upload_size_human():
+    return get_file_size(DATA_UPLOAD_MAX_MEMORY_SIZE)
+
+
 @register.filter(name="get_user_permission")
-def get_user_permission(user):
-    """given a user, return their permission level"""
+def get_user_permission_group(user):
+    """given a user, return their permission group"""
 
     return user.groups.first() or "User"
+
+
+@register.filter(name="has_perm")
+def check_user_has_permission(user, perm_name):
+    """does the given user have a specific permission?"""
+    return user.has_perm(f"bookwyrm.{perm_name}")
 
 
 @register.filter(name="is_instance_admin")
 def is_instance_admin(localname):
     """Returns a boolean indicating whether the user is the instance admin account"""
     return localname == INSTANCE_ACTOR_USERNAME
+
+
+@register.filter(name="dedupe_fields")
+def get_dupe_match_field(original, dupe):
+    """Identify which field is matching for a dedupe"""
+    return [f.verbose_name for f in original.get_shared_fields(dupe)]

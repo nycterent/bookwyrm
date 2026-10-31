@@ -36,6 +36,8 @@ class IsbnHyphenator:
         """hyphenate the given ISBN-13 number using the range message"""
         if isbn_13 is None:
             return None
+        if len(isbn_13) != 13:
+            return isbn_13
 
         # Handle empty string or invalid length ISBN
         if not isbn_13 or len(isbn_13) < 13:

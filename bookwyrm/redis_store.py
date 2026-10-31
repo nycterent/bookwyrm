@@ -1,11 +1,14 @@
 """access the activity stores stored in redis"""
 
 from abc import ABC, abstractmethod
+from typing import Any
+
 import redis
+from django.db.models.query import QuerySet
 
 from bookwyrm import settings
 
-r = redis.from_url(settings.REDIS_ACTIVITY_URL)
+redis_instance = redis.from_url(settings.REDIS_ACTIVITY_URL)
 
 
 class RedisStore(ABC):
@@ -21,7 +24,7 @@ class RedisStore(ABC):
         """add an object to a given set of stores"""
         value = self.get_value(obj)
         # we want to do this as a bulk operation, hence "pipeline"
-        pipeline = r.pipeline()
+        pipeline = redis_instance.pipeline()
         for store in stores:
             # add the status to the feed
             pipeline.zadd(store, value)
@@ -40,34 +43,39 @@ class RedisStore(ABC):
             obj_id = obj
         else:
             obj_id = obj.id
-        pipeline = r.pipeline()
+        pipeline = redis_instance.pipeline()
         for store in stores:
             pipeline.zrem(store, -1, obj_id)
         pipeline.execute()
 
-    def bulk_add_objects_to_store(self, objs, store):
+    def bulk_add_objects_to_store(self, objs: QuerySet[Any], store: str) -> None:
         """add a list of objects to a given store"""
-        pipeline = r.pipeline()
-        for obj in objs[: self.max_length]:
+        pipeline = redis_instance.pipeline()
+        max_length_objs = objs[: self.max_length]
+        for obj in max_length_objs:
             pipeline.zadd(store, self.get_value(obj))
-        if objs and self.max_length:
+        if max_length_objs and self.max_length:
             pipeline.zremrangebyrank(store, 0, -1 * self.max_length)
         pipeline.execute()
 
-    def bulk_remove_objects_from_store(self, objs, store):
+    def bulk_remove_objects_from_store(self, objs: QuerySet[Any], store: str) -> None:
         """remove a list of objects from a given store"""
-        pipeline = r.pipeline()
+        pipeline = redis_instance.pipeline()
         for obj in objs[: self.max_length]:
             pipeline.zrem(store, -1, obj.id)
         pipeline.execute()
 
-    def get_store(self, store, **kwargs):
+    def get_store(self, store: str, **kwargs) -> list[int]:
         """load the values in a store"""
-        return r.zrevrange(store, 0, -1, **kwargs)
+        return redis_instance.zrevrange(store, 0, -1, **kwargs)
 
-    def populate_store(self, store):
+    def get_store_with_scores(self, store: str) -> list[tuple[int, int]]:
+        """load the values in a store including scores"""
+        return redis_instance.zrevrange(store, 0, -1, withscores=True)
+
+    def populate_store(self, store: str) -> None:
         """go from zero to a store"""
-        pipeline = r.pipeline()
+        pipeline = redis_instance.pipeline()
         queryset = self.get_objects_for_store(store)
 
         for obj in queryset[: self.max_length]:

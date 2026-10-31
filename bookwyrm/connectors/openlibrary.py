@@ -1,9 +1,9 @@
 """openlibrary data connector"""
 
 import re
-from typing import Any, Optional, Union, Iterator, Iterable
+from typing import Any, Optional, Union, Iterator, Iterable, cast
 
-from markdown import markdown
+import mistune
 
 from bookwyrm import models
 from bookwyrm.book_search import SearchResult
@@ -126,7 +126,7 @@ class Connector(AbstractConnector):
             key = data["key"]
         except KeyError:
             raise ConnectorException("Invalid book data")
-        url = f"{self.books_url}{key}/editions"
+        url = f"{self.books_url}{key}/editions.json"
         data = self.get_book_data(url)
         edition = pick_default_edition(data["entries"])
         if not edition:
@@ -138,7 +138,7 @@ class Connector(AbstractConnector):
             key = data["works"][0]["key"]
         except (IndexError, KeyError):
             raise ConnectorException("No work found for edition")
-        url = f"{self.books_url}{key}"
+        url = f"{self.books_url}{key}.json"
         return self.get_book_data(url)
 
     def get_authors_from_data(self, data: JsonDict) -> Iterator[models.Author]:
@@ -147,7 +147,7 @@ class Connector(AbstractConnector):
             author_blob = author_blob.get("author", author_blob)
             # this id is "/authors/OL1234567A"
             author_id = author_blob["key"]
-            url = f"{self.base_url}{author_id}"
+            url = f"{self.base_url}{author_id}.json"
             author = self.get_or_create_author(url)
             if not author:
                 continue
@@ -204,7 +204,7 @@ class Connector(AbstractConnector):
 
     def load_edition_data(self, olkey: str) -> JsonDict:
         """query openlibrary for editions of a work"""
-        url = f"{self.books_url}/works/{olkey}/editions"
+        url = f"{self.books_url}/works/{olkey}/editions.json"
         return self.get_book_data(url)
 
     def expand_book_data(self, book: models.Book) -> None:
@@ -249,9 +249,11 @@ def ignore_edition(edition_data: JsonDict) -> bool:
 def get_description(description_blob: Union[JsonDict, str]) -> str:
     """descriptions can be a string or a dict"""
     if isinstance(description_blob, dict):
-        description = markdown(description_blob.get("value", ""))
+        description = cast(
+            str, mistune.html(description_blob.get("value", ""))
+        ).rstrip()
     else:
-        description = markdown(description_blob)
+        description = cast(str, mistune.html(description_blob)).rstrip()
 
     if (
         description.startswith("<p>")

@@ -23,9 +23,7 @@ class TestSeriesModel(TestCase):
         cls.edition = models.Edition.objects.create(
             title="Test Book", parent_work=cls.work
         )
-        cls.series = models.Series.objects.create(
-            user=cls.instance_user, name="Test series"
-        )
+        cls.series = models.Series.objects.create(name="Test series")
 
     def test_seriesbook(self):
         """making a seriesbook"""
@@ -46,5 +44,48 @@ class TestSeriesModel(TestCase):
 
         self.assertEqual(models.SeriesBook.objects.count(), 1)
         self.assertEqual(self.work.seriesbooks.first(), seriesbook)
-        self.assertEqual(self.work.book_series()[0], self.series)
+        self.assertEqual(self.work.get_series()[0], self.series)
         self.assertEqual(self.series.seriesbooks.first(), seriesbook)
+
+    def test_natural_sort_key(self):
+        cases = {
+            "2": (2.0, ""),
+            "0": (0.0, ""),
+            "0a": (0.0, "a"),
+            "10": (10.0, ""),
+            "4.5": (4.5, ""),
+            "01": (1.0, ""),
+            "007": (7.0, ""),
+            "2-beta": (2.0, "-beta"),
+            "1.5-rc": (1.5, "-rc"),
+            "12abc34": (12.0, "abc34"),
+            # values without a leading number sort last
+            "Prequel": (float("inf"), "Prequel"),
+            "abc123": (float("inf"), "abc123"),
+            "Book 2": (float("inf"), "Book 2"),
+            " 2": (float("inf"), " 2"),
+            "v2": (float("inf"), "v2"),
+            None: (float("inf"), ""),
+            "": (float("inf"), ""),
+        }
+        for number, expected in cases.items():
+            with self.subTest(series_number=number):
+                seriesbook = models.SeriesBook(series_number=number)
+                self.assertEqual(seriesbook.natural_sort_key, expected)
+
+    def test_series_uniqueness(self):
+        """There CAN be two books that are #1 in a series because of poor data quality"""
+        duplicate_work = models.Work.objects.create(title="Test Work")
+        models.SeriesBook.objects.create(
+            user=self.instance_user,
+            book=self.work,
+            series_number=1,
+            series=self.series,
+        )
+        models.SeriesBook.objects.create(
+            user=self.instance_user,
+            book=duplicate_work,
+            series_number=1,
+            series=self.series,
+        )
+        self.assertEqual(self.series.seriesbooks.count(), 2)

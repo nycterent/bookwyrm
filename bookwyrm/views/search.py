@@ -77,10 +77,23 @@ def book_search(request):
 
     # try a local-only search
     local_results = search(query, min_confidence=min_confidence)
-    paginated = Paginator(local_results, PAGE_LENGTH)
+
+    cleaned_results = local_results
+    if request.user.is_authenticated:
+        blocked = request.user.blocked_books.values_list("id", flat=True)
+        cleaned_results = list(
+            filter(lambda b: b.parent_work.id not in blocked, local_results)
+        )
+
+    blocked_books_excluded = (
+        True if len(cleaned_results) < len(local_results) else False
+    )
+
+    paginated = Paginator(cleaned_results, PAGE_LENGTH)
     page = paginated.get_page(request.GET.get("page"))
     data = {
         "query": query,
+        "blocked_books_excluded": blocked_books_excluded,
         "results": page,
         "type": "book",
         "remote": search_remote,
@@ -138,20 +151,25 @@ def user_search(request):
         except PermissionDenied:
             return TemplateResponse(request, "search/user.html", data)
 
-    results = (
-        models.User.viewer_aware_objects(viewer)
-        .annotate(
-            similarity=Greatest(
-                TrigramSimilarity("username", query),
-                TrigramSimilarity("localname", query),
+    cleaned_query = query[1:] if query[0] == "@" else query
+    exact_match = models.User.objects.filter(username=cleaned_query)
+    if exact_match.exists():
+        results = exact_match
+    else:
+        results = (
+            models.User.viewer_aware_objects(viewer)
+            .annotate(
+                similarity=Greatest(
+                    TrigramSimilarity("username", query),
+                    TrigramSimilarity("localname", query),
+                )
             )
+            .filter(
+                similarity__gt=0.5,
+            )
+            .exclude(localname=INSTANCE_ACTOR_USERNAME)
+            .order_by("-similarity")
         )
-        .filter(
-            similarity__gt=0.5,
-        )
-        .exclude(localname=INSTANCE_ACTOR_USERNAME)
-        .order_by("-similarity")
-    )
 
     # don't expose remote users
     if not viewer.is_authenticated:

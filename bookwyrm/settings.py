@@ -61,15 +61,31 @@ PREVIEW_TEXT_COLOR = env.str("PREVIEW_TEXT_COLOR", "#363636")
 PREVIEW_IMG_WIDTH = env.int("PREVIEW_IMG_WIDTH", 1200)
 PREVIEW_IMG_HEIGHT = env.int("PREVIEW_IMG_HEIGHT", 630)
 PREVIEW_DEFAULT_COVER_COLOR = env.str("PREVIEW_DEFAULT_COVER_COLOR", "#002549")
-PREVIEW_DEFAULT_FONT = env.str("PREVIEW_DEFAULT_FONT", "Source Han Sans")
+PREVIEW_DEFAULT_FONT = env.str(
+    "PREVIEW_DEFAULT_FONT",
+    "NotoSansMultilanguage-Bold, NotoSansMultilanguage-Regular, NotoSansMultilanguage-Light",
+)
 
-FONTS = {
-    "Source Han Sans": {
-        "directory": "source_han_sans",
-        "filename": "SourceHanSans-VF.ttf.ttc",
-        "url": "https://github.com/adobe-fonts/source-han-sans/raw/release/Variable/OTC/SourceHanSans-VF.ttf.ttc",
-    }
-}
+FONTS = env.json(
+    "FONTS",
+    {
+        "NotoSansMultilanguage-Bold": {
+            "directory": "NotoMultilanguageFonts",
+            "filename": "NotoSansMultilanguage-Bold.ttf",
+            "url": "https://github.com/sefadogann/noto-multilanguage/raw/refs/heads/main/NotoMultilanguageFonts/NotoSansMultilanguage-Bold.ttf",
+        },
+        "NotoSansMultilanguage-Regular": {
+            "directory": "NotoMultilanguageFonts",
+            "filename": "NotoSansMultilanguage-Regular.ttf",
+            "url": "https://github.com/sefadogann/noto-multilanguage/raw/refs/heads/main/NotoMultilanguageFonts/NotoSansMultilanguage-Regular.ttf",
+        },
+        "NotoSansMultilanguage-Light": {
+            "directory": "NotoMultilanguageFonts",
+            "filename": "NotoSansMultilanguage-Light.ttf",
+            "url": "https://github.com/sefadogann/noto-multilanguage/raw/refs/heads/main/NotoMultilanguageFonts/NotoSansMultilanguage-Light.ttf",
+        },
+    },
+)
 FONT_DIR = os.path.join(STATIC_ROOT, "fonts")
 
 # Quick-start development settings - unsuitable for production
@@ -110,7 +126,6 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "django.middleware.cache.UpdateCacheMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -126,7 +141,6 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "bookwyrm.middleware.FileTooBig",
     "bookwyrm.middleware.ForceLogoutMiddleware",
-    "django.middleware.cache.FetchFromCacheMiddleware",
 ]
 
 ROOT_URLCONF = "bookwyrm.urls"
@@ -154,7 +168,6 @@ TEMPLATES = [
     },
 ]
 
-CACHE_MIDDLEWARE_SECONDS = 0 if DEBUG else env.int("CACHE_MIDDLEWARE_SECONDS", 60)
 LOG_LEVEL = env("LOG_LEVEL", "INFO").upper()
 # Override aspects of the default handler to our taste
 # See https://docs.djangoproject.com/en/3.2/topics/logging/#default-logging-configuration
@@ -566,3 +579,6 @@ INSTANCE_ACTOR_USERNAME = "bookwyrm.instance.actor"
 # We only allow specifying DATA_UPLOAD_MAX_MEMORY_SIZE in MiB from .env
 # (note the difference in variable names).
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.int("DATA_UPLOAD_MAX_MEMORY_MiB", 100) << 20
+
+
+UPLOAD_IMAGE_DIMENSIONS = env.list("UPLOAD_IMAGE_DIMENSIONS", [400, 1200], subcast=int)

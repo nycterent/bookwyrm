@@ -4,7 +4,7 @@ import datetime
 from importlib import import_module
 import re
 import zoneinfo
-from typing import Optional, Iterable
+from typing import Any, Optional, Iterable
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ from bookwyrm.tasks import app, MISC
 from bookwyrm.utils import regex
 from bookwyrm.utils.db import add_update_fields
 from .activitypub_mixin import OrderedCollectionPageMixin, ActivitypubMixin
-from .base_model import BookWyrmModel, DeactivationReason, new_access_code
+from .base_model import BookWyrmModel, DEACTIVATION_REASONS, new_access_code
 from .federated_server import FederatedServer
 from . import fields
 
@@ -38,6 +38,7 @@ SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
 
 FeedFilterChoices = [
     ("review", _("Reviews")),
+    ("rating", _("Ratings")),
     ("comment", _("Comments")),
     ("quotation", _("Quotations")),
     ("everything", _("Everything else")),
@@ -123,6 +124,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
         through_fields=("user_subject", "user_object"),
         related_name="blocked_by",
     )
+    blocked_books = models.ManyToManyField("Work", related_name="blocked_by")
     saved_lists = models.ManyToManyField(
         "List", symmetrical=False, related_name="saved_lists", blank=True
     )
@@ -143,6 +145,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     manually_approves_followers = fields.BooleanField(default=False)
     theme = models.ForeignKey("Theme", null=True, blank=True, on_delete=models.SET_NULL)
     hide_follows = fields.BooleanField(default=False)
+    is_profile_private = models.BooleanField(default=False)
 
     # migration fields
     moved_to = fields.RemoteIdField(
@@ -165,6 +168,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     show_ratings = models.BooleanField(default=True)
     newsletter_subscription = models.BooleanField(default=False)
     default_post_to_feed = models.BooleanField(default=True)
+    readwise_api_key = models.CharField(max_length=255, null=True, blank=True)
 
     # feed options
     feed_status_types = DjangoArrayField(
@@ -187,7 +191,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
         max_length=255,
     )
     deactivation_reason = models.CharField(
-        max_length=255, choices=DeactivationReason, null=True, blank=True
+        max_length=255, choices=DEACTIVATION_REASONS, null=True, blank=True
     )
     deactivation_date = models.DateTimeField(null=True, blank=True)
     allow_reactivation = models.BooleanField(default=False)
@@ -241,8 +245,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
     @property
     def alt_text(self):
         """alt text with username"""
-
-        return "avatar for {:s}".format(self.localname or self.username)
+        return _("avatar for {name}").format(name=(self.localname or self.username))
 
     @property
     def display_name(self):
@@ -268,6 +271,16 @@ class User(OrderedCollectionPageMixin, AbstractUser):
             read=False,
             notification_type__in=["REPLY", "MENTION", "TAG", "REPORT"],
         ).exists()
+
+    @property
+    def filters_applied(self):
+        return set(self.feed_status_types) != set(get_feed_filter_choices())
+
+    def get_followers(self):
+        return self.followers.filter(is_active=True).order_by("-updated_date")
+
+    def get_following(self):
+        return self.following.filter(is_active=True).order_by("-updated_date")
 
     activity_serializer = activitypub.Person
 
@@ -322,7 +335,7 @@ class User(OrderedCollectionPageMixin, AbstractUser):
         """activitypub following list"""
         remote_id = f"{self.remote_id}/following"
         return self.to_ordered_collection(
-            self.following.order_by("-updated_date").all(),
+            self.get_following().all(),
             remote_id=remote_id,
             collection_only=True,
             id_only=True,
@@ -333,14 +346,14 @@ class User(OrderedCollectionPageMixin, AbstractUser):
         """activitypub followers list"""
         remote_id = self.followers_url
         return self.to_ordered_collection(
-            self.followers.order_by("-updated_date").all(),
+            self.get_followers().all(),
             remote_id=remote_id,
             collection_only=True,
             id_only=True,
             **kwargs,
         ).serialize()
 
-    def to_activity(self, **kwargs):
+    def to_activity(self, **kwargs) -> dict[str, Any]:
         """override default AP serializer to add context object
         idk if this is the best way to go about this"""
         if not self.is_active:
@@ -539,6 +552,15 @@ class User(OrderedCollectionPageMixin, AbstractUser):
         for sess in self.sessions.all():
             if not cache_session.exists(session_key=sess.session_key):
                 sess.delete()
+
+    def is_profile_visible_to(self, viewer_id):
+        if not self.is_profile_private:
+            return True
+        if viewer_id is None:
+            return False
+        if self.id == viewer_id:
+            return True
+        return self.followers.filter(id=viewer_id).exists()
 
 
 class KeyPair(ActivitypubMixin, BookWyrmModel):

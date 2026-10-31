@@ -5,6 +5,7 @@ from django.contrib import admin
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import path, re_path, include
 from django.views.generic.base import TemplateView
+from django.views.i18n import JavaScriptCatalog
 
 from bookwyrm import settings, views
 from bookwyrm.utils import regex
@@ -26,10 +27,12 @@ STATUS_TYPES_STRING = "|".join(status_types)
 STATUS_PATH = rf"{USER_PATH}/({STATUS_TYPES_STRING})/(?P<status_id>\d+)"
 
 BOOK_PATH = r"^book/(?P<book_id>\d+)"
+MERGEABLE_BOOK_PATH = r"^book/(?P<mergeable_object_id>\d+)"
 
 STREAMS = "|".join(s["key"] for s in settings.STREAMS)
 
 urlpatterns = [
+    path("jsi18n/", JavaScriptCatalog.as_view(), name="javascript-catalog"),
     path("admin/", admin.site.urls),
     path(
         "robots.txt",
@@ -252,6 +255,16 @@ urlpatterns = [
         name="settings-activate-user",
     ),
     re_path(
+        r"^settings/users/set-merge-permissions/(?P<user_id>\d+)/?$",
+        views.SetMergePermission.as_view(),
+        name="settings-user-manage-data-perms",
+    ),
+    re_path(
+        r"^settings/manage-data/merge/?$",
+        views.MergeData.as_view(),
+        name="settings-merge-data",
+    ),
+    re_path(
         r"^settings/federation-settings/?$",
         views.FederationSettings.as_view(),
         name="settings-federation-settings",
@@ -380,7 +393,7 @@ urlpatterns = [
         r"^settings/reports/?$", views.ReportsAdmin.as_view(), name="settings-reports"
     ),
     re_path(
-        r"^settings/reports/(?P<report_id>\d+)/?$",
+        r"^settings/reports/(?P<report_id>\d+)(\.json)?/?$",
         views.ReportAdmin.as_view(),
         name="settings-report",
     ),
@@ -415,6 +428,51 @@ urlpatterns = [
         r"^report/link/(?P<link_id>\d+)?$",
         views.Report.as_view(),
         name="report-link",
+    ),
+    re_path(
+        r"^settings/data-quality/duplicates?$",
+        views.Duplicates.as_view(),
+        name="settings-duplicates",
+    ),
+    re_path(
+        r"^settings/data-quality/manual-merge/(?P<model_name>\w+)/(?P<canonical_id>\d+)/?$",
+        views.ManualMerge.as_view(),
+        name="settings-manual-merge",
+    ),
+    re_path(
+        r"^settings/data-quality/confirm-manual-merge/(?P<model_name>\w+)/(?P<canonical_id>\d+)/?$",
+        views.confirm_manual_merge,
+        name="settings-confirm-manual-merge",
+    ),
+    re_path(
+        r"^settings/data-quality/run-scan/?$",
+        views.run_deduplication_scan_task,
+        name="settings-dedupe-run-scan",
+    ),
+    re_path(
+        r"^settings/data-quality/schedule-scan/?$",
+        views.schedule_deduplication_scan_task,
+        name="settings-dedupe-schedule-scan",
+    ),
+    re_path(
+        r"^settings/data-quality/schedule-merge/?$",
+        views.schedule_deduplication_task,
+        name="settings-dedupe-schedule-merge",
+    ),
+    re_path(
+        r"^settings/data-quality/unschedule/(?P<task_id>\d+)/?$",
+        views.unschedule_deduplication_scan_task,
+        name="settings-dedupe-unschedule",
+    ),
+    re_path(
+        r"^settings/data-quality/problems/?$",
+        views.DataProblems.as_view(),
+        name="settings-problems",
+    ),
+    re_path(
+        r"^settings/data-quality/problems/block-merge/?$",
+        views.block_problem_merges,
+        name="settings-problems-block-merge",
     ),
     re_path(
         r"^settings/imports/(?P<status>(complete|active))?/?$",
@@ -518,7 +576,7 @@ urlpatterns = [
         name="get-started-users",
     ),
     # feeds
-    re_path(rf"^(?P<tab>{STREAMS})/?$", views.Feed.as_view()),
+    re_path(rf"^(?P<tab>{STREAMS})/?$", views.Feed.as_view(), name="feed"),
     re_path(
         r"^direct-messages/?$", views.DirectMessage.as_view(), name="direct-messages"
     ),
@@ -609,7 +667,7 @@ urlpatterns = [
         name="user-comments-rss",
     ),
     re_path(
-        rf"{USER_PATH}/(?P<direction>(followers|following))(.json)?/?$",
+        rf"{USER_PATH}/(?P<direction>(followers|following))(\.json)?/?$",
         views.Relationships.as_view(),
         name="user-relationships",
     ),
@@ -622,7 +680,7 @@ urlpatterns = [
     # groups
     re_path(rf"{USER_PATH}/groups/?$", views.UserGroups.as_view(), name="user-groups"),
     re_path(
-        r"^group/(?P<group_id>\d+)(.json)?/?$", views.Group.as_view(), name="group"
+        r"^group/(?P<group_id>\d+)(\.json)?/?$", views.Group.as_view(), name="group"
     ),
     re_path(
         rf"^group/(?P<group_id>\d+){regex.SLUG}/?$", views.Group.as_view(), name="group"
@@ -650,12 +708,22 @@ urlpatterns = [
         name="reject-group-invitation",
     ),
     # lists
+    re_path(
+        rf"{USER_PATH}/suggestions/?$",
+        views.UserSuggestions.as_view(),
+        name="user-suggestions",
+    ),
     re_path(rf"{USER_PATH}/lists/?$", views.UserLists.as_view(), name="user-lists"),
     re_path(r"^list/?$", views.Lists.as_view(), name="lists"),
     re_path(r"^list/saved/?$", views.SavedLists.as_view(), name="saved-lists"),
     re_path(r"^list/(?P<list_id>\d+)(\.json)?/?$", views.List.as_view(), name="list"),
     re_path(
         rf"^list/(?P<list_id>\d+){regex.SLUG}/?$", views.List.as_view(), name="list"
+    ),
+    re_path(
+        r"^suggestionlist/(?P<list_id>\d+)/item/(?P<list_item>\d+)/?$",
+        views.SuggestionListItem.as_view(),
+        name="suggestion-list-item",
     ),
     re_path(
         r"^list/(?P<list_id>\d+)/item/(?P<list_item>\d+)/?$",
@@ -687,7 +755,7 @@ urlpatterns = [
     # User books
     re_path(rf"{USER_PATH}/books/?$", views.Shelf.as_view(), name="user-shelves"),
     re_path(
-        rf"^{USER_PATH}/(shelf|books)/(?P<shelf_identifier>[\w-]+)(.json)?/?$",
+        rf"^{USER_PATH}/(shelf|books)/(?P<shelf_identifier>[\w-]+)(\.json)?/?$",
         views.Shelf.as_view(),
         name="shelf",
     ),
@@ -697,7 +765,7 @@ urlpatterns = [
         name="shelf-rss",
     ),
     re_path(
-        rf"^{LOCAL_USER_PATH}/(books|shelf)/(?P<shelf_identifier>[\w-]+)(.json)?/?$",
+        rf"^{LOCAL_USER_PATH}/(books|shelf)/(?P<shelf_identifier>[\w-]+)(\.json)?/?$",
         views.Shelf.as_view(),
         name="shelf",
     ),
@@ -797,15 +865,22 @@ urlpatterns = [
         views.ReactivateUser.as_view(),
         name="prefs-reactivate",
     ),
+    # block users
     re_path(r"^preferences/block/?$", views.Block.as_view(), name="prefs-block"),
     re_path(r"^block/(?P<user_id>\d+)/?$", views.Block.as_view()),
     re_path(r"^unblock/(?P<user_id>\d+)/?$", views.unblock),
+    # block books
+    re_path(
+        r"^preferences/books/?$", views.BlockedBooks.as_view(), name="prefs-block-books"
+    ),
+    re_path(r"^block-book/(?P<book_id>\d+)/?$", views.BlockedBooks.as_view()),
+    re_path(r"^unblock-book/(?P<book_id>\d+)/?$", views.unblock_book),
     # statuses
-    re_path(rf"{STATUS_PATH}(.json)?/?$", views.Status.as_view(), name="status"),
+    re_path(rf"{STATUS_PATH}(\.json)?/?$", views.Status.as_view(), name="status"),
     re_path(rf"{STATUS_PATH}{regex.SLUG}/?$", views.Status.as_view(), name="status"),
     re_path(rf"{STATUS_PATH}/activity/?$", views.Status.as_view(), name="status"),
     re_path(
-        rf"{STATUS_PATH}/replies(.json)?/?$", views.Replies.as_view(), name="replies"
+        rf"{STATUS_PATH}/replies(\.json)?/?$", views.Replies.as_view(), name="replies"
     ),
     re_path(
         r"^edit/(?P<status_id>\d+)/?$", views.EditStatus.as_view(), name="edit-status"
@@ -830,6 +905,8 @@ urlpatterns = [
         views.DeleteStatus.as_view(),
         name="delete-status",
     ),
+    # upload
+    re_path(r"^upload/?$", views.CreateUserUpload.as_view(), name="user-upload"),
     # interact
     re_path(r"^favorite/(?P<status_id>\d+)/?$", views.Favorite.as_view(), name="fav"),
     re_path(
@@ -838,10 +915,12 @@ urlpatterns = [
     re_path(r"^boost/(?P<status_id>\d+)/?$", views.Boost.as_view()),
     re_path(r"^unboost/(?P<status_id>\d+)/?$", views.Unboost.as_view()),
     # books
-    re_path(rf"{BOOK_PATH}(.json)?/?$", views.Book.as_view(), name="book"),
-    re_path(rf"{BOOK_PATH}{regex.SLUG}/?$", views.Book.as_view(), name="book"),
+    re_path(rf"{MERGEABLE_BOOK_PATH}(\.json)?/?$", views.Book.as_view(), name="book"),
     re_path(
-        rf"{BOOK_PATH}/(?P<user_statuses>review|comment|quote)/?$",
+        rf"{MERGEABLE_BOOK_PATH}{regex.SLUG}/?$", views.Book.as_view(), name="book"
+    ),
+    re_path(
+        rf"{MERGEABLE_BOOK_PATH}/(?P<user_statuses>review|comment|quote)/?$",
         views.Book.as_view(),
         name="book-user-statuses",
     ),
@@ -860,7 +939,7 @@ urlpatterns = [
         views.ConfirmEditBook.as_view(),
         name="create-book-confirm",
     ),
-    re_path(rf"{BOOK_PATH}/editions(.json)?/?$", views.Editions.as_view()),
+    re_path(rf"{MERGEABLE_BOOK_PATH}/editions(\.json)?/?$", views.Editions.as_view()),
     re_path(
         r"^upload-cover/(?P<book_id>\d+)/?$", views.upload_cover, name="upload-cover"
     ),
@@ -895,18 +974,45 @@ urlpatterns = [
         name="book-update-remote",
     ),
     re_path(
+        rf"{BOOK_PATH}/suggestions(\.json)?/?$",
+        views.SuggestionList.as_view(),
+        name="suggestion-list",
+    ),
+    re_path(
+        rf"{BOOK_PATH}/suggestions{regex.SLUG}/?$",
+        views.SuggestionList.as_view(),
+        name="suggestion-list",
+    ),
+    re_path(
+        rf"{BOOK_PATH}/suggestions/add/?$",
+        views.AddSuggestion.as_view(),
+        name="book-add-suggestion",
+    ),
+    re_path(
+        r"^suggestion/(?P<list_id>\d+)/remove/?$",
+        views.book_remove_suggestion,
+        name="book-remove-suggestion",
+    ),
+    re_path(
+        rf"{BOOK_PATH}/suggestions/endorse/(?P<item_id>\d+)/?$",
+        views.endorse_suggestion,
+        name="suggestion-endorse",
+    ),
+    re_path(
         r"^author/(?P<author_id>\d+)/update/(?P<connector_identifier>[\w\.]+)/?$",
         views.update_author_from_remote,
         name="author-update-remote",
     ),
     # isbn
-    re_path(r"^isbn/(?P<isbn>[\dxX]+)(.json)?/?$", views.Isbn.as_view()),
+    re_path(r"^isbn/(?P<isbn>[\dxX]+)(\.json)?/?$", views.Isbn.as_view()),
     # author
     re_path(
-        r"^author/(?P<author_id>\d+)(.json)?/?$", views.Author.as_view(), name="author"
+        r"^author/(?P<mergeable_object_id>\d+)(\.json)?/?$",
+        views.Author.as_view(),
+        name="author",
     ),
     re_path(
-        rf"^author/(?P<author_id>\d+){regex.SLUG}/?$",
+        rf"^author/(?P<mergeable_object_id>\d+){regex.SLUG}/?$",
         views.Author.as_view(),
         name="author",
     ),
@@ -917,20 +1023,25 @@ urlpatterns = [
     ),
     # series
     re_path(
-        rf"^series/(?P<series_id>\d+)(.json)?{regex.SLUG}/?$",
+        r"^series/(?P<mergeable_object_id>\d+)(\.json)?/?$",
         views.Series.as_view(),
         name="series",
     ),
     re_path(
-        r"^series/(?P<series_id>\d+)(.json)/?$", views.Series.as_view()
+        rf"^series/(?P<mergeable_object_id>\d+)(\.json)?{regex.SLUG}/?$",
+        views.Series.as_view(),
+        name="series",
+    ),
+    re_path(
+        r"^series/(?P<mergeable_object_id>\d+)(\.json)/?$", views.Series.as_view()
     ),  # activitypub
     re_path(
-        r"^series/(?P<series_id>\d+)/edit/?$",
+        r"^series/(?P<mergeable_object_id>\d+)/edit/?$",
         views.EditSeries.as_view(),
         name="edit-series",
     ),
     re_path(
-        r"^seriesbook/(?P<seriesbook_id>\d+)(.json)?/?$",
+        r"^seriesbook/(?P<seriesbook_id>\d+)(\.json)?/?$",
         views.SeriesBook.as_view(),
         name="seriesbook",
     ),

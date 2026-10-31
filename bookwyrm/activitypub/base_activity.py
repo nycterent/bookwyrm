@@ -1,10 +1,14 @@
 """basics for an activitypub serializer"""
 
 from __future__ import annotations
+from contextlib import contextmanager
 from dataclasses import dataclass, fields, MISSING
+from hashlib import md5
 from json import JSONEncoder
 import logging
-from typing import Optional, Union, TypeVar, overload, Any
+import random
+import time
+from typing import Generator, Optional, TypeVar, overload, Any
 
 import requests
 
@@ -12,11 +16,20 @@ from django.apps import apps
 from django.db import IntegrityError, transaction
 from django.utils.http import http_date
 
+from redis.commands.core import ResponseT
+
 from bookwyrm import models
 from bookwyrm.connectors import ConnectorException, get_data
 from bookwyrm.models import base_model
+from bookwyrm.redis_store import redis_instance
 from bookwyrm.signatures import make_signature
-from bookwyrm.settings import DOMAIN, INSTANCE_ACTOR_USERNAME
+from bookwyrm.settings import (
+    DOMAIN,
+    INSTANCE_ACTOR_USERNAME,
+    USER_AGENT,
+    QUERY_TIMEOUT,
+    SEARCH_TIMEOUT,
+)
 from bookwyrm.tasks import app, MISC
 from bookwyrm.federation.backoff import RemoteInstanceBackoff
 
@@ -24,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 TBookWyrmModel = TypeVar("TBookWyrmModel", bound=base_model.BookWyrmModel)
+TActivityObject = TypeVar("ActivityObject", bound="ActivityObject")
 
 
 class ActivitySerializerError(ValueError):
@@ -37,6 +51,45 @@ class ActivityEncoder(JSONEncoder):
         return o.__dict__
 
 
+@contextmanager
+def item_lock(object_id: str) -> Generator[ResponseT, None, None]:
+    """Set a mutex lock on an incoming item to prevent race conditions causing duplicates"""
+
+    # hash the remote id so the key is a reasonable length
+    try:
+        id_hash = md5(object_id.encode("utf-8")).hexdigest()
+    except AttributeError:
+        raise ActivitySerializerError("Incoming object has no identifier")
+    lock_id = f"lock:{id_hash}"
+    # expire after enough time to make up to ~59 queries
+    expire_seconds = time.monotonic() + (QUERY_TIMEOUT * 60)
+    # try to get the lock until you have it or it has (nearly) expired
+    while time.monotonic() < expire_seconds - 5:
+        # 1: arbitrary value for the key
+        # nx: only set if the key doesn't already exist
+        # ex: expire after this many seconds
+        if lock := redis_instance.set(lock_id, "1", nx=True, ex=QUERY_TIMEOUT * 60):
+            break
+
+        # if we don't have the lock, try again in a few seconds
+        sleep_time = random.randint(1, QUERY_TIMEOUT)
+        time.sleep(sleep_time)
+
+    if not lock:
+        raise ActivitySerializerError(
+            f"Lock expired on {object_id} before being acquired"
+        )
+
+    try:
+        yield lock
+    finally:
+        # after we have used it, clear the lock
+        # only release lock if you have it and it isn't expired
+        # otherwise we might clear a lock owned by another process
+        if time.monotonic() < expire_seconds and lock:
+            redis_instance.delete(lock_id)
+
+
 @dataclass
 class Signature:
     """public key block"""
@@ -47,7 +100,11 @@ class Signature:
     type: str = "RsaSignature2017"
 
 
-def naive_parse(activity_objects, activity_json, serializer=None):
+def naive_parse(
+    activity_objects: dict,
+    activity_json: dict,
+    serializer: type[TActivityObject] | None = None,
+) -> TActivityObject:
     """this navigates circular import issues by looking up models' serializers"""
     if not serializer:
         if activity_json.get("publicKeyPem"):
@@ -76,7 +133,7 @@ class ActivityObject:
     def __init__(
         self,
         activity_objects: Optional[
-            dict[str, Union[str, list[str], ActivityObject, base_model.BookWyrmModel]]
+            dict[str, str | list[str] | ActivityObject | base_model.BookWyrmModel]
         ] = None,
         **kwargs: Any,
     ):
@@ -149,96 +206,103 @@ class ActivityObject:
             return None
 
         # check for an existing instance
-        instance = instance or model.find_existing(self.serialize())
+        instance: TBookWyrmModel = instance or model.find_existing(self.serialize())
 
         if not instance and not allow_create:
             # so that we don't create when we want to delete or update
             return None
         instance = instance or model()
 
-        # keep track of what we've changed
-        update_fields = []
-        # sets field on the model using the activity value
-        for field in instance.simple_fields:
-            try:
+        identifier = (
+            self.id
+            or instance.id
+            or getattr(self, "href", None)
+            or getattr(self, "url", None)
+        )
+        with item_lock(identifier):  # lock processing this item to prevent duplicates
+            # keep track of what we've changed
+            update_fields = []
+            # sets field on the model using the activity value
+            for field in instance.simple_fields:
+                try:
+                    changed = field.set_field_from_activity(
+                        instance,
+                        self,
+                        overwrite=overwrite,
+                        allow_external_connections=allow_external_connections,
+                    )
+                    if changed:
+                        update_fields.append(field.name)
+                except AttributeError as e:
+                    raise ActivitySerializerError(e)
+
+            # image fields have to be set after other fields because they can save
+            # too early and jank up users
+            for field in instance.image_fields:
                 changed = field.set_field_from_activity(
                     instance,
                     self,
+                    save=save,
                     overwrite=overwrite,
                     allow_external_connections=allow_external_connections,
                 )
                 if changed:
                     update_fields.append(field.name)
-            except AttributeError as e:
-                raise ActivitySerializerError(e)
 
-        # image fields have to be set after other fields because they can save
-        # too early and jank up users
-        for field in instance.image_fields:
-            changed = field.set_field_from_activity(
-                instance,
-                self,
-                save=save,
-                overwrite=overwrite,
-                allow_external_connections=allow_external_connections,
-            )
-            if changed:
-                update_fields.append(field.name)
+            if not save:
+                return instance
 
-        if not save:
+            with transaction.atomic():
+                # can't force an update on fields unless the object already exists in the db
+                if not instance.id:
+                    update_fields = None
+                # we can't set many to many and reverse fields on an unsaved object
+                try:
+                    try:
+                        instance.save(broadcast=False, update_fields=update_fields)
+                    except TypeError:
+                        instance.save(update_fields=update_fields)
+                except IntegrityError as e:
+                    raise ActivitySerializerError(e)
+
+                # add many to many fields, which have to be set post-save
+                for field in instance.many_to_many_fields:
+                    # mention books/users/hashtags, for example
+                    field.set_field_from_activity(
+                        instance,
+                        self,
+                        allow_external_connections=allow_external_connections,
+                    )
+
+            # reversed relationships in the models
+            for (
+                model_field_name,
+                activity_field_name,
+            ) in instance.deserialize_reverse_fields:
+                # attachments on Status, for example
+                values = getattr(self, activity_field_name)
+                if values is None or values is MISSING:
+                    continue
+
+                model_field = getattr(model, model_field_name)
+                # creating a Work, model_field is 'editions'
+                # creating a User, model field is 'key_pair'
+                related_model = model_field.field.model
+                related_field_name = model_field.field.name
+
+                for item in values:
+                    if trigger and item == trigger.remote_id:
+                        continue
+                    set_related_field.delay(
+                        related_model.__name__,
+                        instance.__class__.__name__,
+                        related_field_name,
+                        instance.remote_id,
+                        item,
+                    )
             return instance
 
-        with transaction.atomic():
-            # can't force an update on fields unless the object already exists in the db
-            if not instance.id:
-                update_fields = None
-            # we can't set many to many and reverse fields on an unsaved object
-            try:
-                try:
-                    instance.save(broadcast=False, update_fields=update_fields)
-                except TypeError:
-                    instance.save(update_fields=update_fields)
-            except IntegrityError as e:
-                raise ActivitySerializerError(e)
-
-            # add many to many fields, which have to be set post-save
-            for field in instance.many_to_many_fields:
-                # mention books/users/hashtags, for example
-                field.set_field_from_activity(
-                    instance,
-                    self,
-                    allow_external_connections=allow_external_connections,
-                )
-
-        # reversed relationships in the models
-        for (
-            model_field_name,
-            activity_field_name,
-        ) in instance.deserialize_reverse_fields:
-            # attachments on Status, for example
-            values = getattr(self, activity_field_name)
-            if values is None or values is MISSING:
-                continue
-
-            model_field = getattr(model, model_field_name)
-            # creating a Work, model_field is 'editions'
-            # creating a User, model field is 'key_pair'
-            related_model = model_field.field.model
-            related_field_name = model_field.field.name
-
-            for item in values:
-                if trigger and item == trigger.remote_id:
-                    continue
-                set_related_field.delay(
-                    related_model.__name__,
-                    instance.__class__.__name__,
-                    related_field_name,
-                    instance.remote_id,
-                    item,
-                )
-        return instance
-
-    def serialize(self, **kwargs):
+    def serialize(self, **kwargs) -> dict[str, Any]:
         """convert to dictionary with context attr"""
         omit = kwargs.get("omit", ())
         data = self.__dict__.copy()
@@ -266,8 +330,12 @@ class ActivityObject:
 @app.task(queue=MISC)
 @transaction.atomic
 def set_related_field(
-    model_name, origin_model_name, related_field_name, related_remote_id, data
-):
+    model_name: str,
+    origin_model_name: str,
+    related_field_name: str,
+    related_remote_id: str,
+    data,
+) -> None:
     """load reverse related fields (editions, attachments) without blocking"""
     model = apps.get_model(f"bookwyrm.{model_name}", require_ready=True)
     origin_model = apps.get_model(f"bookwyrm.{origin_model_name}", require_ready=True)
@@ -326,7 +394,7 @@ def set_related_field(
         item.save()
 
 
-def get_model_from_type(activity_type):
+def get_model_from_type(activity_type: str) -> type[TBookWyrmModel]:
     """given the activity, what type of model"""
     activity_models = apps.get_models()
     model = [
@@ -367,7 +435,7 @@ def resolve_remote_id(
 
 def resolve_remote_id(
     remote_id: str,
-    model: Optional[Union[str, type[base_model.BookWyrmModel]]] = None,
+    model: Optional[str | type[base_model.BookWyrmModel]] = None,
     refresh: bool = False,
     save: bool = True,
     get_activity: bool = False,
@@ -460,7 +528,7 @@ def resolve_remote_id(
     return item.to_model(model=model, instance=result, save=save)
 
 
-def get_representative():
+def get_representative() -> models.User:
     """Get or create an actor representing the instance
     to sign outgoing HTTP GET requests"""
     return models.User.objects.get_or_create(
@@ -473,7 +541,7 @@ def get_representative():
     )[0]
 
 
-def get_activitypub_data(url):
+def get_activitypub_data(url: str | bytes) -> Any:
     """wrapper for request.get"""
     now = http_date()
     sender = get_representative()
@@ -481,21 +549,22 @@ def get_activitypub_data(url):
         # this shouldn't happen. it would be bad if it happened.
         raise ValueError("No private key found for sender")
     try:
-        resp = requests.get(
+        response = requests.get(
             url,
             headers={
                 "Accept": 'application/ld+json; profile="https://www.w3.org/ns/activitystreams"',
                 "Date": now,
                 "Signature": make_signature("get", sender, url, now),
+                "User-Agent": USER_AGENT,
             },
-            timeout=15,
+            timeout=SEARCH_TIMEOUT,
         )
     except requests.RequestException:
         raise ConnectorException()
-    if not resp.ok:
-        resp.raise_for_status()
+    if not response.ok:
+        response.raise_for_status()
     try:
-        data = resp.json()
+        data = response.json()
     except ValueError:
         raise ConnectorException()
 

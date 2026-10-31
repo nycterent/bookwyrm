@@ -1,7 +1,7 @@
 {% load utilities %}
 {% load shelf_tags %}
 
-{% if request.user.is_authenticated %}
+{% if request.user.is_authenticated and book %}
 
 {% with book.id|uuid as uuid %}
 {% active_shelf book as active_shelf %}
@@ -10,7 +10,7 @@
 <div class="field has-addons mb-0 has-text-weight-normal" data-shelve-button-book="{{ book.id }}">
     {% if switch_mode and active_shelf_book != book %}
     <div class="control">
-        {% include 'snippets/switch_edition_button.html' with edition=book size='is-small' %}
+        {% include 'snippets/switch_edition_button.html' with edition=book %}
     </div>
     {% else %}
     <div class="control">

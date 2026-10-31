@@ -4,11 +4,13 @@
 {% load humanize %}
 {% load utilities %}
 {% load book_display_tags %}
+{% load date_ext %}
 
 {% block title %}{{ author.name }}{% endblock %}
 
 {% block content %}
 <div class="block">
+    {% include "snippets/merge_banner/author.html" with original=author dupe=author_dupe object_type='author' %}
     <div class="columns is-mobile">
         <div class="column">
             <h1 class="title">{{ author.name }}</h1>
@@ -30,7 +32,7 @@
     {% firstof author.aliases author.born author.died as details %}
     {% firstof author.wikipedia_link author.website author.openlibrary_key author.inventaire_id author.isni author.isfdb author.wikidata as links %}
     {% if details or links %}
-    <div class="column is-3">
+    <div class="column is-3 is-one-quarter">
         {% if details %}
         <section class="block content">
             <h2 class="title is-4">{% trans "Author details" %}</h2>
@@ -44,19 +46,23 @@
                 </div>
                 {% endif %}
 
+                {% with date=author.born|naturalday_partial %}
                 {% if author.born %}
                 <div class="is-flex mt-1">
                     <dt class="has-text-weight-bold mr-1">{% trans "Born:" %}</dt>
-                    <dd itemprop="birthDate">{{ author.born|naturalday }}</dd>
+                    <dd itemprop="birthDate">{{ date }}</dd>
                 </div>
                 {% endif %}
+                {% endwith %}
 
+                {% with date=author.died|naturalday_partial %}
                 {% if author.died %}
                 <div class="is-flex mt-1">
                     <dt class="has-text-weight-bold mr-1">{% trans "Died:" %}</dt>
-                    <dd itemprop="deathDate">{{ author.died|naturalday }}</dd>
+                    <dd itemprop="deathDate">{{ date }}</dd>
                 </div>
                 {% endif %}
+                {% endwith %}
 
                 {% if series %}
                 <div class="is-flex mt-1">
@@ -160,7 +166,7 @@
                 {% if author.goodreads_key %}
                 <div>
                     <a itemprop="sameAs" href="https://www.goodreads.com/author/show/{{ author.goodreads_key }}" target="_blank" rel="nofollow noopener noreferrer">
-                        {% trans "View on Goodreads" %}
+                        {% trans "View on GoodReads" %}
                     </a>
                 </div>
                 {% endif %}
@@ -170,27 +176,28 @@
     </div>
     {% endif %}
 
-    <div class="column">
+    <div class="column is-three-quarters">
         {% if author.bio %}
         {% include "snippets/trimmed_text.html" with full=author.bio trim_length=200 %}
         {% endif %}
 
         <h2 class="title is-4">{% blocktrans with name=author.name %}Books by {{ name }}{% endblocktrans %}</h2>
+        {% include "author/filters.html" %}
         <div class="columns is-multiline is-mobile">
-        {% for book in books %}
-        {% with book=book|author_edition:author %}
+        {% for work in works %}
+        {% with edition=work|author_edition:author %}
             <div class="column is-one-fifth-tablet is-half-mobile is-flex is-flex-direction-column">
                 <div class="is-flex-grow-1 mb-3">
-                    {% include 'landing/small-book.html' with book=book %}
+                    {% include 'snippets/small-book.html' with book=edition %}
                 </div>
-                {% include 'snippets/shelve_button/shelve_button.html' with book=book %}
+                {% include 'snippets/shelve_button/shelve_button.html' with book=edition %}
             </div>
         {% endwith %}
         {% endfor %}
         </div>
 
         <div>
-            {% include 'snippets/pagination.html' with page=books %}
+            {% include 'snippets/pagination.html' with page=works %}
         </div>
     </div>
 </div>
