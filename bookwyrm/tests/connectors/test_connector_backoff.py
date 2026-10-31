@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.core.cache import cache
 
 from bookwyrm.connectors.connector_backoff import (
@@ -13,6 +13,20 @@ from bookwyrm.connectors.connector_backoff import (
 from bookwyrm import models
 
 
+# these tests exercise cache-backed state, so they need a real cache rather
+# than the dummy cache the test settings default to
+LOCMEM_CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "file_resubmit": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "/tmp/file_resubmit_tests/",
+    },
+}
+
+
+@override_settings(CACHES=LOCMEM_CACHES)
 class TestConnectorBackoff(TestCase):
     """Test the ConnectorBackoff class"""
 
@@ -190,6 +204,7 @@ class TestConnectorBackoff(TestCase):
         self.assertEqual(stats["failure_count"], 0)
 
 
+@override_settings(CACHES=LOCMEM_CACHES)
 class TestSyncConnectorHealth(TestCase):
     """Test the Celery task for syncing health"""
 

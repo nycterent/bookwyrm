@@ -497,15 +497,19 @@ def resolve_remote_id(
         RemoteInstanceBackoff.record_failure(remote_id)
         return None
     except requests.HTTPError as e:
-        if (
-            hasattr(e, "response")
-            and hasattr(e.response, "status_code")
-            and e.response.status_code in (401, 404, 410)
-        ):
-            # 401/404/410 are expected - private accounts, deleted/gone resources
+        status_code = getattr(getattr(e, "response", None), "status_code", None)
+        if status_code == 410:
+            # gone for good - backing off and retrying it would be pointless
+            logger.warning(
+                "request for object dropped because it is gone (410) - remote_id: %s",
+                remote_id,
+            )
+            return None
+        if status_code in (401, 404):
+            # expected - private accounts, deleted resources
             logger.info(
                 "Remote resource unavailable (%s) - remote_id: %s",
-                e.response.status_code,
+                status_code,
                 remote_id,
             )
         else:
