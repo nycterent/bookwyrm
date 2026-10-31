@@ -17,6 +17,7 @@ module.exports = {
         "declaration-block-no-redundant-longhand-properties": null,
         "no-descending-specificity": null,
         "alpha-value-notation": null,
+        "color-function-alias-notation": null,
         "media-feature-range-notation": null,
     },
     "overrides": [
