@@ -13,10 +13,14 @@ def upgrade_series_data():
     series_count = Series.objects.count()
     seriesbook_count = SeriesBook.objects.count()
 
+    # Editions are processed oldest first so that the edition that defines a
+    # series' name is always the same one; without an explicit order the result
+    # depends on the row order PostgreSQL happens to return.
     for book in (
         Edition.objects.exclude(parent_work=None)
         .exclude(series=None)
         .exclude(series="")
+        .order_by("pk")
     ):
         user = activitypub.get_representative()
         vector = SearchVector("name", weight="A") + SearchVector(
@@ -26,7 +30,7 @@ def upgrade_series_data():
             Series.objects.annotate(search=vector)
             .annotate(rank=SearchRank(vector, book.series, normalization=32))
             .filter(rank__gt=0.19)
-            .order_by("-rank")
+            .order_by("-rank", "pk")
         )
 
         if possible_series.exists():
@@ -36,8 +40,10 @@ def upgrade_series_data():
                 "parent_work__pk"
             )  # the parent work is the book attached to the series
 
-            same_author_sb = SeriesBook.objects.filter(book__in=books).filter(
-                series__in=Subquery(possible_series.values("pk"))
+            same_author_sb = (
+                SeriesBook.objects.filter(book__in=books)
+                .filter(series__in=Subquery(possible_series.values("pk")))
+                .order_by("pk")
             )  # there is a possible series with a seriesbook by a matching author
 
             match = same_author_sb.filter(
