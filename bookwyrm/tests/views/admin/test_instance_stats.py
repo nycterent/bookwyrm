@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.test.client import RequestFactory
 
 from bookwyrm import models, views
+from bookwyrm.management.commands import initdb
 from bookwyrm.tests.validate_html import validate_html
 
 
@@ -44,8 +45,10 @@ class InstanceStatsViewTest(TestCase):
                 localname="admin",
                 remote_id="https://example.com/users/admin",
             )
-            # Grant admin permissions
-            cls.admin_user.groups.add(models.Group.objects.get(name="admin"))
+        initdb.init_groups()
+        initdb.init_permissions()
+        # Grant admin permissions
+        cls.admin_user.groups.add(models.Group.objects.get(name="admin"))
 
     def setUp(self):
         """Individual test setup"""
