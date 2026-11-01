@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from django.contrib.auth.models import Group
 from django.test import TestCase
 from django.test.client import RequestFactory
 
@@ -48,7 +49,7 @@ class InstanceStatsViewTest(TestCase):
         initdb.init_groups()
         initdb.init_permissions()
         # Grant admin permissions
-        cls.admin_user.groups.add(models.Group.objects.get(name="admin"))
+        cls.admin_user.groups.add(Group.objects.get(name="admin"))
 
     def setUp(self):
         """Individual test setup"""
