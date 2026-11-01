@@ -73,65 +73,6 @@
     {% endif %}
 </section>
 
-{# Readwise Stats Section #}
-<section class="block">
-    <h2 class="title is-4">{% trans "Readwise Integration" %}</h2>
-
-    <div class="columns is-multiline has-text-centered">
-        <div class="column is-3-desktop is-6-tablet">
-            <div class="notification is-link is-light">
-                <h3 class="heading">{% trans "Users with Token" %}</h3>
-                <p class="title is-4">{{ readwise.users_with_token|intcomma }}</p>
-            </div>
-        </div>
-        <div class="column is-3-desktop is-6-tablet">
-            <div class="notification is-success is-light">
-                <h3 class="heading">{% trans "Exported Quotes" %}</h3>
-                <p class="title is-4">{{ readwise.exported_quotes|intcomma }}</p>
-                <p class="is-size-7 has-text-grey">{{ readwise.export_percentage }}% {% trans "of" %} {{ readwise.total_quotes|intcomma }}</p>
-            </div>
-        </div>
-        <div class="column is-3-desktop is-6-tablet">
-            <div class="notification is-info is-light">
-                <h3 class="heading">{% trans "Imported Highlights" %}</h3>
-                <p class="title is-4">{{ readwise.matched_highlights|intcomma }}</p>
-                <p class="is-size-7 has-text-grey">{{ readwise.match_percentage }}% {% trans "matched" %}</p>
-            </div>
-        </div>
-        <div class="column is-3-desktop is-6-tablet">
-            <div class="notification is-warning is-light">
-                <h3 class="heading">{% trans "Unmatched Highlights" %}</h3>
-                <p class="title is-4">{{ readwise.unmatched_highlights|intcomma }}</p>
-            </div>
-        </div>
-    </div>
-
-    {# Recent syncs #}
-    {% if readwise.recent_syncs %}
-    <div class="box">
-        <h3 class="subtitle is-5">{% trans "Recent Sync Activity" %}</h3>
-        <table class="table is-fullwidth is-striped">
-            <thead>
-                <tr>
-                    <th>{% trans "User" %}</th>
-                    <th>{% trans "Last Export" %}</th>
-                    <th>{% trans "Last Import" %}</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for sync in readwise.recent_syncs %}
-                <tr>
-                    <td>{{ sync.user.username }}</td>
-                    <td>{% if sync.last_export_at %}{{ sync.last_export_at|naturaltime }}{% else %}-{% endif %}</td>
-                    <td>{% if sync.last_import_at %}{{ sync.last_import_at|naturaltime }}{% else %}-{% endif %}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% endif %}
-</section>
-
 {# Connector Health Section #}
 <section class="block">
     <h2 class="title is-4">{% trans "Connector Health" %}</h2>

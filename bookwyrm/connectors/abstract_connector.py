@@ -11,16 +11,19 @@ import asyncio
 import time
 from PIL import Image, UnidentifiedImageError
 import requests
+import redis.asyncio as redis
 from requests.exceptions import RequestException
 import aiohttp
 
 from django.contrib.postgres.search import SearchRank, SearchVector
 from django.core.files.base import ContentFile
+from django.utils import timezone
 from django.db import transaction
 from django.db.models import Subquery
 
 from bookwyrm import activitypub, models, settings
-from bookwyrm.settings import USER_AGENT, INSTANCE_ACTOR_USERNAME
+from bookwyrm.settings import USER_AGENT, INSTANCE_ACTOR_USERNAME, REDIS_ACTIVITY_URL
+from bookwyrm.tasks import app, CONNECTORS
 from .connector_manager import load_more_data, ConnectorException, raise_not_valid_url
 from .connector_backoff import ConnectorBackoff
 from .format_mappings import format_mappings
@@ -28,7 +31,10 @@ from ..book_search import SearchResult
 
 logger = logging.getLogger(__name__)
 
+
 JsonDict = dict[str, Any]
+
+CONNECTOR_STATUS_RATE = 60  # once per 60s error or ok
 
 
 class ConnectorResults(TypedDict):
@@ -91,12 +97,24 @@ class AbstractMinimalConnector(ABC):
             "User-Agent": USER_AGENT,
         }
         params = {"min_confidence": str(min_confidence)}
+        error_ratelimit_key = f"connector:error:{self.connector.pk}"
+        success_ratelimit_key = f"connector:success:{self.connector.pk}"
         start_time = time.time()
         try:
-            async with session.get(url, headers=headers, params=params) as response:
+            async with (
+                session.get(url, headers=headers, params=params) as response,
+                redis.from_url(REDIS_ACTIVITY_URL) as redis_instance,  # type: ignore[no-untyped-call]
+            ):
                 latency_ms = int((time.time() - start_time) * 1000)
 
                 if not response.ok:
+                    if await redis_instance.set(
+                        error_ratelimit_key, "1", nx=True, ex=CONNECTOR_STATUS_RATE
+                    ):
+                        update_connector_status.delay(
+                            self.connector.pk,
+                            f"Unable to connect to {url}: {response.reason}",
+                        )
                     logger.info("Unable to connect to %s: %s", url, response.reason)
                     ConnectorBackoff.record_failure(
                         self.identifier, f"http_{response.status}", latency_ms
@@ -106,11 +124,22 @@ class AbstractMinimalConnector(ABC):
                 try:
                     raw_data = await response.json()
                 except aiohttp.client_exceptions.ContentTypeError as err:
+                    if await redis_instance.set(
+                        error_ratelimit_key, "1", nx=True, ex=CONNECTOR_STATUS_RATE
+                    ):
+                        update_connector_status.delay(
+                            self.connector.pk, f"ContentType Error: {str(err)}"
+                        )
                     logger.exception(err)
                     ConnectorBackoff.record_failure(
                         self.identifier, "parse_error", latency_ms
                     )
                     return None
+
+                if await redis_instance.set(
+                    success_ratelimit_key, "1", nx=True, ex=CONNECTOR_STATUS_RATE
+                ):
+                    update_connector_status.delay(self.connector.id)
 
                 # Record success with latency
                 ConnectorBackoff.record_success(self.identifier, latency_ms)
@@ -123,10 +152,28 @@ class AbstractMinimalConnector(ABC):
                 )
         except asyncio.TimeoutError:
             latency_ms = int((time.time() - start_time) * 1000)
+            async with redis.from_url(  # type: ignore[no-untyped-call]
+                REDIS_ACTIVITY_URL
+            ) as redis_instance:
+                if await redis_instance.set(
+                    error_ratelimit_key, "1", nx=True, ex=CONNECTOR_STATUS_RATE
+                ):
+                    update_connector_status.delay(
+                        self.connector.pk, f"Timed out for url: {url}"
+                    )
             logger.info("Connection timed out for url: %s", url)
             ConnectorBackoff.record_failure(self.identifier, "timeout", latency_ms)
         except aiohttp.ClientError as err:
             latency_ms = int((time.time() - start_time) * 1000)
+            async with redis.from_url(  # type: ignore[no-untyped-call]
+                REDIS_ACTIVITY_URL
+            ) as redis_instance:
+                if await redis_instance.set(
+                    error_ratelimit_key, "1", nx=True, ex=CONNECTOR_STATUS_RATE
+                ):
+                    update_connector_status.delay(
+                        self.connector.pk, f"Client Error: {str(err)}"
+                    )
             logger.info(err)
             ConnectorBackoff.record_failure(self.identifier, "client_error", latency_ms)
         return None
@@ -189,9 +236,16 @@ class AbstractMinimalConnector(ABC):
                         edition.series = series.name
                         edition.series_number = work.series_number
                         edition.save()
-
+                        # clean up the work series to avoid stringifying objects
+                        work.series = None
+                        work.series_number = None
+                        work.save()
                     continue
 
+            # clean up
+            work.series = None
+            work.series_number = None
+            work.save()
             edition.series = None
             edition.series_number = None
             edition.save()
@@ -468,9 +522,7 @@ def get_data(
     return data
 
 
-def get_image(
-    url: str, timeout: int = 10
-) -> Union[tuple[ContentFile[bytes], str], tuple[None, None]]:
+def get_image(url: str, timeout: int = 10) -> tuple[Any, str] | tuple[None, None]:
     """wrapper for requesting an image"""
     raise_not_valid_url(url)
     try:
@@ -585,7 +637,6 @@ def activitydata_to_seriesbook(
         series = instance
         series.save()
     else:
-        new.user = user
         series = new
         series.save()
 
@@ -596,3 +647,20 @@ def activitydata_to_seriesbook(
         series=series,
         defaults={"user": user, "series_number": work.series_number},
     )
+
+
+@app.task(queue=CONNECTORS)
+def update_connector_status(
+    connector_id: int, error_message: str | None = None
+) -> None:
+    try:
+        connector = models.Connector.objects.get(pk=connector_id)
+        if error_message:
+            connector.latest_error = error_message[:255]
+            connector.most_recent_error = timezone.now()
+            connector.save(update_fields=["latest_error", "most_recent_error"])
+        else:
+            connector.most_recent_success = timezone.now()
+            connector.save(update_fields=["most_recent_success"])
+    except Exception as err:
+        logger.exception(err)

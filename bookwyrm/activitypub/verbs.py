@@ -4,7 +4,12 @@ from dataclasses import dataclass, field
 from typing import List
 from django.apps import apps
 
-from .base_activity import ActivityObject, Signature, resolve_remote_id
+from .base_activity import (
+    ActivityObject,
+    ActivitySerializerError,
+    Signature,
+    resolve_remote_id,
+)
 from .ordered_collection import CollectionItem
 
 
@@ -15,7 +20,7 @@ class Verb(ActivityObject):
     actor: str
     object: ActivityObject
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """usually we just want to update and save"""
         # self.object may return None if the object is invalid in an expected way
         # ie, Question type
@@ -41,7 +46,7 @@ class Delete(Verb):
     cc: List[str] = field(default_factory=lambda: [])
     type: str = "Delete"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """find and delete the activity object"""
         if not self.object:
             return
@@ -69,7 +74,7 @@ class Update(Verb):
     to: List[str]
     type: str = "Update"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """update a model instance from the dataclass"""
         if not self.object:
             return
@@ -84,7 +89,7 @@ class Undo(Verb):
 
     type: str = "Undo"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """find and remove the activity object"""
         if isinstance(self.object, str):
             # it may be that something should be done with these, but idk what
@@ -131,7 +136,7 @@ class Follow(Verb):
     object: str
     type: str = "Follow"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """relationship save"""
         self.to_model(allow_external_connections=allow_external_connections)
 
@@ -143,7 +148,7 @@ class Block(Verb):
     object: str
     type: str = "Block"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """relationship save"""
         self.to_model(allow_external_connections=allow_external_connections)
 
@@ -155,7 +160,7 @@ class Accept(Verb):
     object: Follow
     type: str = "Accept"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """accept a request"""
         obj = self.object.to_model(save=False, allow_create=True)
         obj.accept()
@@ -168,7 +173,7 @@ class Reject(Verb):
     object: Follow
     type: str = "Reject"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """reject a follow or follow request"""
 
         for model_name in ["UserFollowRequest", "UserFollows", None]:
@@ -192,7 +197,7 @@ class Add(Verb):
     object: CollectionItem
     type: str = "Add"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """figure out the target to assign the item to a collection"""
         target = resolve_remote_id(self.target)
         item = self.object.to_model(save=False)
@@ -206,7 +211,7 @@ class Remove(Add):
 
     type: str = "Remove"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """find and remove the activity object"""
         obj = self.object.to_model(save=False, allow_create=False)
         if obj:
@@ -220,7 +225,7 @@ class Like(Verb):
     object: str
     type: str = "Like"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """like"""
         self.to_model(allow_external_connections=allow_external_connections)
 
@@ -235,7 +240,7 @@ class Announce(Verb):
     object: str
     type: str = "Announce"
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """boost"""
         self.to_model(allow_external_connections=allow_external_connections)
 
@@ -249,7 +254,7 @@ class Move(Verb):
     origin: str = None
     target: str = None
 
-    def action(self, allow_external_connections=True):
+    def action(self, allow_external_connections: bool = True):
         """move"""
 
         object_is_user = resolve_remote_id(remote_id=self.object, model="User")
@@ -265,3 +270,47 @@ class Move(Verb):
         else:
             # we might do something with this to move other objects at some point
             pass
+
+
+@dataclass(init=False)
+class Flag(Verb):
+    """Report a user to their home server"""
+
+    to: str = None
+    object: List[str] = None
+    links: List[str] = None
+    type: str = "Flag"
+    content: str = None
+
+    def action(self, allow_external_connections: bool = True):
+        """Create the report and attach reported statuses"""
+        report = self.to_model()
+        # go through "objects" and figure out what they are
+        for obj in self.object:
+            # what type of obj is it?
+            try:
+                item = resolve_remote_id(
+                    remote_id=obj,
+                    save=False,
+                    model="Status",
+                )
+            except ActivitySerializerError:
+                try:
+                    # Mastodon includes the user in the object
+                    item = resolve_remote_id(
+                        remote_id=obj,
+                        save=False,
+                        model="User",
+                    )
+                except ActivitySerializerError:
+                    # ¯\_(ツ)_/¯
+                    continue
+
+            # fix incoming Mastodon objects
+            if hasattr(item, "username"):
+                if not report.reported_user:
+                    report.reported_user = item
+                continue
+
+            report.statuses.add(item)
+        report.save()

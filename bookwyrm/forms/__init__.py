@@ -12,4 +12,3 @@ from .links import *
 from .lists import *
 from .status import *
 from .user_admin import *
-from .readwise import *

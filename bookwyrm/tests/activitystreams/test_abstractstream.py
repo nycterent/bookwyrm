@@ -108,8 +108,8 @@ class Activitystreams(TestCase):
             book=self.book,
         )
         with (
-            patch("bookwyrm.activitystreams.r.set"),
-            patch("bookwyrm.activitystreams.r.delete"),
+            patch("bookwyrm.activitystreams.redis_instance.set"),
+            patch("bookwyrm.activitystreams.redis_instance.delete"),
             patch("bookwyrm.activitystreams.ActivityStream.get_store") as redis_mock,
         ):
             redis_mock.return_value = [status.id, status2.id]
@@ -204,3 +204,41 @@ class Activitystreams(TestCase):
         self.assertFalse(self.local_user.id in users)
         self.assertFalse(self.another_user.id in users)
         self.assertFalse(self.remote_user.id in users)
+
+    def test_abstractstream_exclude_books(self, *_):
+        """exlude users who have blocked a book"""
+
+        self.local_user.blocked_books.add(self.book.parent_work)
+
+        status = models.Comment.objects.create(
+            user=self.remote_user,
+            content="This book is awful",
+            privacy="public",
+            book=self.book,
+        )
+
+        users = self.test_stream.get_audience(status)
+        self.assertTrue(self.another_user.id in users)
+        self.assertFalse(self.local_user.id in users)
+
+    def test_abstractstream_exclude_books_in_thread(self, *_):
+        """exlude users who have blocked a book mentioned earlier in the thread"""
+
+        self.local_user.blocked_books.add(self.book.parent_work)
+
+        parent_status = models.Comment.objects.create(
+            user=self.remote_user,
+            content="This book is awful",
+            privacy="public",
+            book=self.book,
+        )
+        status = models.Status.objects.create(
+            user=self.remote_user,
+            content="a bad reply to an awful book",
+            privacy="public",
+            reply_parent=parent_status,
+        )
+
+        users = self.test_stream.get_audience(status)
+        self.assertTrue(self.another_user.id in users)
+        self.assertFalse(self.local_user.id in users)

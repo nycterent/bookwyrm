@@ -3,13 +3,13 @@
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.db import IntegrityError
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotFound
-from django.shortcuts import redirect
+from django.http import HttpResponse, HttpResponseBadRequest
+from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views import View
 
 from bookwyrm import models
-from .helpers import is_api_request
+from .helpers import is_api_request, redirect_to_referer
 
 
 @method_decorator(login_required, name="dispatch")
@@ -19,7 +19,9 @@ class Favorite(View):
     def post(self, request, status_id):
         """create a like"""
         cache.delete(f"fav-{request.user.id}-{status_id}")
-        status = models.Status.objects.get(id=status_id)
+        status = get_object_or_404(models.Status, id=status_id)
+        status.raise_visible_to_user(request.user)
+
         try:
             models.Favorite.objects.create(status=status, user=request.user)
         except IntegrityError:
@@ -28,7 +30,7 @@ class Favorite(View):
 
         if is_api_request(request):
             return HttpResponse()
-        return redirect("/")
+        return redirect_to_referer(request)
 
 
 @method_decorator(login_required, name="dispatch")
@@ -38,17 +40,15 @@ class Unfavorite(View):
     def post(self, request, status_id):
         """unlike a status"""
         cache.delete(f"fav-{request.user.id}-{status_id}")
-        status = models.Status.objects.get(id=status_id)
-        try:
-            favorite = models.Favorite.objects.get(status=status, user=request.user)
-        except models.Favorite.DoesNotExist:
-            # can't find that status, idk
-            return HttpResponseNotFound()
+        status = get_object_or_404(models.Status, id=status_id)
+        status.raise_visible_to_user(request.user)
 
+        favorite = get_object_or_404(models.Favorite, status=status, user=request.user)
         favorite.delete()
+
         if is_api_request(request):
             return HttpResponse()
-        return redirect("/")
+        return redirect_to_referer(request)
 
 
 @method_decorator(login_required, name="dispatch")
@@ -58,8 +58,8 @@ class Boost(View):
     def post(self, request, status_id):
         """boost a status"""
         cache.delete(f"boost-{request.user.id}-{status_id}")
-        status = models.Status.objects.get(id=status_id)
-        # is it boostable?
+        status = get_object_or_404(models.Status, id=status_id)
+        status.raise_visible_to_user(request.user)
         if not status.boostable:
             return HttpResponseBadRequest()
 
@@ -67,7 +67,7 @@ class Boost(View):
             boosted_status=status, user=request.user
         ).exists():
             # you already boosted that.
-            return redirect("/")
+            return redirect_to_referer(request)
 
         models.Boost.objects.create(
             boosted_status=status,
@@ -76,7 +76,7 @@ class Boost(View):
         )
         if is_api_request(request):
             return HttpResponse()
-        return redirect("/")
+        return redirect_to_referer(request)
 
 
 @method_decorator(login_required, name="dispatch")
@@ -86,7 +86,8 @@ class Unboost(View):
     def post(self, request, status_id):
         """boost a status"""
         cache.delete(f"boost-{request.user.id}-{status_id}")
-        status = models.Status.objects.get(id=status_id)
+        status = get_object_or_404(models.Status, id=status_id)
+        status.raise_visible_to_user(request.user)
         boost = models.Boost.objects.filter(
             boosted_status=status, user=request.user
         ).first()
@@ -94,4 +95,4 @@ class Unboost(View):
         boost.delete()
         if is_api_request(request):
             return HttpResponse()
-        return redirect("/")
+        return redirect_to_referer(request)

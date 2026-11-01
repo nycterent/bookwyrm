@@ -1,11 +1,10 @@
 """Daily newsletter generation and sending"""
+
 import base64
 import logging
-import mimetypes
 import zoneinfo
 from collections import defaultdict
 from datetime import datetime, timedelta
-from io import BytesIO
 
 import requests
 from django.db.models import Q
@@ -178,9 +177,7 @@ def get_yesterday_range_for_user(user):
     start_of_yesterday = datetime.combine(
         yesterday, datetime.min.time(), tzinfo=user_tz
     )
-    end_of_yesterday = datetime.combine(
-        yesterday, datetime.max.time(), tzinfo=user_tz
-    )
+    end_of_yesterday = datetime.combine(yesterday, datetime.max.time(), tzinfo=user_tz)
 
     # Convert to UTC for database queries
     utc = zoneinfo.ZoneInfo("UTC")
@@ -301,10 +298,14 @@ def prepare_grouped_activities_with_images(grouped, base_url):
             "items": [],
         }
         for item in group["items"]:
-            group_data["items"].append({
-                "activity": item,
-                "book_cover": get_book_cover_base64(getattr(item, "book", None), base_url),
-            })
+            group_data["items"].append(
+                {
+                    "activity": item,
+                    "book_cover": get_book_cover_base64(
+                        getattr(item, "book", None), base_url
+                    ),
+                }
+            )
         result.append(group_data)
     return result
 
@@ -363,9 +364,7 @@ def send_newsletter_to_user(user, activities, date_str, yesterday_date):
 
     # Own activities with embedded images (flat list)
     data["own_activities"] = {
-        "reviews": [
-            prepare_activity_with_images(a, base_url) for a in own_reviews[:5]
-        ],
+        "reviews": [prepare_activity_with_images(a, base_url) for a in own_reviews[:5]],
         "comments": [
             prepare_activity_with_images(a, base_url) for a in own_comments[:3]
         ],
@@ -383,13 +382,16 @@ def send_newsletter_to_user(user, activities, date_str, yesterday_date):
         for a in activities["reviews"][:6]
     ]
     data["featured_review"] = all_reviews_prepared[0] if all_reviews_prepared else None
-    data["grid_reviews"] = all_reviews_prepared[1:5] if len(all_reviews_prepared) > 1 else []
+    data["grid_reviews"] = (
+        all_reviews_prepared[1:5] if len(all_reviews_prepared) > 1 else []
+    )
 
     # Featured highlight (first quotation)
     all_quotations = activities["quotations"][:3]
     data["featured_highlight"] = (
         prepare_activity_with_images(all_quotations[0], base_url, "followed")
-        if all_quotations else None
+        if all_quotations
+        else None
     )
 
     # Followed activities grouped by user with embedded images
@@ -445,6 +447,7 @@ def send_daily_newsletter():
     PRODUCTION: Set NEWSLETTER_DEBUG=false to enable 6 AM timezone check.
     """
     import os
+
     debug_mode = os.environ.get("NEWSLETTER_DEBUG", "true").lower() == "true"
 
     # Get all active, local users who have subscribed
@@ -480,7 +483,7 @@ def send_daily_newsletter():
                 user_tz = zoneinfo.ZoneInfo(user.preferred_timezone)
             except (ValueError, KeyError):
                 user_tz = zoneinfo.ZoneInfo("UTC")
-            yesterday_local = (datetime.now(user_tz).date() - timedelta(days=1))
+            yesterday_local = datetime.now(user_tz).date() - timedelta(days=1)
 
             # Format date string using user's local yesterday
             date_str = yesterday_local.strftime("%B %d, %Y")

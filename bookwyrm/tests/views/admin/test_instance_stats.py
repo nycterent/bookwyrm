@@ -1,10 +1,13 @@
 """Tests for Instance Stats admin view"""
+
 from unittest.mock import patch
 
+from django.contrib.auth.models import Group
 from django.test import TestCase
 from django.test.client import RequestFactory
 
 from bookwyrm import models, views
+from bookwyrm.management.commands import initdb
 from bookwyrm.tests.validate_html import validate_html
 
 
@@ -17,7 +20,6 @@ class TestInstanceStatsImports(TestCase):
 
         self.assertTrue(hasattr(instance_stats, "InstanceStats"))
         self.assertTrue(hasattr(instance_stats, "get_federation_stats"))
-        self.assertTrue(hasattr(instance_stats, "get_readwise_stats"))
         self.assertTrue(hasattr(instance_stats, "get_activity_stats"))
         self.assertTrue(hasattr(instance_stats, "get_connector_stats"))
 
@@ -44,10 +46,10 @@ class InstanceStatsViewTest(TestCase):
                 localname="admin",
                 remote_id="https://example.com/users/admin",
             )
-            # Grant admin permissions
-            cls.admin_user.groups.add(
-                models.Group.objects.get(name="admin")
-            )
+        initdb.init_groups()
+        initdb.init_permissions()
+        # Grant admin permissions
+        cls.admin_user.groups.add(Group.objects.get(name="admin"))
 
     def setUp(self):
         """Individual test setup"""
@@ -101,22 +103,10 @@ class InstanceStatsFunctionsTest(TestCase):
         self.assertIn("remote_users", federation)
         self.assertIn("software_breakdown", federation)
 
-    def test_get_readwise_stats(self):
-        """Test readwise stats function returns expected structure"""
-        from bookwyrm.views.admin.instance_stats import get_readwise_stats
-
-        stats = get_readwise_stats()
-        self.assertIn("readwise", stats)
-        readwise = stats["readwise"]
-        self.assertIn("users_with_token", readwise)
-        self.assertIn("exported_quotes", readwise)
-        self.assertIn("total_quotes", readwise)
-        self.assertIn("total_imported", readwise)
-        self.assertIn("matched_highlights", readwise)
-        self.assertIn("unmatched_highlights", readwise)
-
     def test_get_activity_stats(self):
         """Test activity stats function returns expected structure"""
+        import json
+
         from django.utils import timezone
         from bookwyrm.views.admin.instance_stats import get_activity_stats
 
@@ -128,8 +118,9 @@ class InstanceStatsFunctionsTest(TestCase):
         self.assertIn("status_by_day", activity)
         self.assertIn("quotes_by_day", activity)
         self.assertIn("servers_by_day", activity)
-        self.assertEqual(len(activity["labels"]), 7)
-        self.assertEqual(len(activity["status_by_day"]), 7)
+        # the series are JSON-encoded for the JavaScript chart
+        self.assertEqual(len(json.loads(activity["labels"])), 7)
+        self.assertEqual(len(json.loads(activity["status_by_day"])), 7)
 
     def test_get_connector_stats(self):
         """Test connector stats function returns expected structure"""

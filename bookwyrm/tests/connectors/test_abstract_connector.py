@@ -10,6 +10,7 @@ from bookwyrm.connectors.abstract_connector import (
     Mapping,
     get_data,
     activitydata_to_seriesbook,
+    update_connector_status,
 )
 from bookwyrm.settings import BASE_URL, INSTANCE_ACTOR_USERNAME
 
@@ -227,25 +228,20 @@ class AbstractConnector(TestCase):
         """do we get a seriesbook with existing series?"""
 
         author = models.Author.objects.create(name="Sammy")
-        series = models.Series.objects.create(
-            user=self.local_user, name="Test Series 1"
-        )
-        models.SeriesBook.objects.create(
-            user=self.local_user, book=self.book, series=series
-        )
-
+        series = models.Series.objects.create(name="Test Series 1")
         work = models.Work.objects.create(title="Test Book")
-        work.series = [{"name": "Test Series 1"}]
-        edition = models.Edition.objects.create(title="Test Book 2")
+        work.authors.add(author)
+        models.SeriesBook.objects.create(user=self.local_user, book=work, series=series)
+
+        work_2 = models.Work.objects.create(title="Testing again")
+        work_2.series = [{"name": "Test Series 1"}]
+        edition = models.Edition.objects.create(title="Testing again")
         edition.authors.add(author)
-        self.book.authors.add(author)
-        edition.save()
-        self.book.save()
 
         self.assertEqual(models.Series.objects.count(), 1)
         self.assertEqual(models.SeriesBook.objects.count(), 1)
 
-        self.connector.get_or_create_seriesbook_from_data(work=work, edition=edition)
+        self.connector.get_or_create_seriesbook_from_data(work=work_2, edition=edition)
 
         self.assertEqual(models.Series.objects.count(), 1)
         self.assertEqual(models.SeriesBook.objects.count(), 2)
@@ -253,21 +249,17 @@ class AbstractConnector(TestCase):
     def test_get_or_create_seriesbook_with_ambiguous_series(self):
         """do we get series info in the book when we can't match author?"""
 
-        series = models.Series.objects.create(
-            user=self.local_user, name="Test Series 1"
-        )
-        models.SeriesBook.objects.create(
-            user=self.local_user, book=self.book, series=series
-        )
-
-        work = models.Work.objects.create(title="Test Book 2")
-        work.series = [{"name": "Test Series 1"}]
+        series = models.Series.objects.create(name="Test Series 1")
+        work = models.Work.objects.create(title="Test Book 1")
+        models.SeriesBook.objects.create(user=self.local_user, book=work, series=series)
+        work_2 = models.Work.objects.create(title="Test Book 2")
+        work_2.series = [{"name": "Test Series 1"}]
         edition = models.Edition.objects.create(title="Test Book 2")
 
         self.assertEqual(models.Series.objects.count(), 1)
         self.assertEqual(models.SeriesBook.objects.count(), 1)
 
-        self.connector.get_or_create_seriesbook_from_data(work=work, edition=edition)
+        self.connector.get_or_create_seriesbook_from_data(work=work_2, edition=edition)
 
         self.assertEqual(models.Series.objects.count(), 1)
         self.assertEqual(models.SeriesBook.objects.count(), 1)
@@ -293,9 +285,7 @@ class AbstractConnector(TestCase):
         """do we get a seriesbook but not a duplicate series?"""
 
         work = models.Work.objects.create(title="Test Book 2")
-        series = models.Series.objects.create(
-            user=self.local_user, name="Test Series A"
-        )
+        series = models.Series.objects.create(name="Test Series A")
 
         self.assertEqual(models.Series.objects.count(), 1)
         self.assertEqual(models.SeriesBook.objects.count(), 0)
@@ -311,9 +301,7 @@ class AbstractConnector(TestCase):
         """do we reuse the existing series and seriesbook?"""
 
         work = models.Work.objects.create(title="Test Book 2")
-        series = models.Series.objects.create(
-            user=self.local_user, name="Test Series A"
-        )
+        series = models.Series.objects.create(name="Test Series A")
         models.SeriesBook.objects.create(user=self.local_user, book=work, series=series)
 
         self.assertEqual(models.Series.objects.count(), 1)
@@ -325,3 +313,25 @@ class AbstractConnector(TestCase):
 
         self.assertEqual(models.Series.objects.count(), 1)
         self.assertEqual(models.SeriesBook.objects.count(), 1)
+
+    def test_update_connector_status(self):
+        """make sure we save errors correctly"""
+        self.assertIsNone(self.connector.connector.most_recent_error)
+
+        message = "normal length message"
+        update_connector_status(self.connector.connector.id, message)
+
+        self.connector.connector.refresh_from_db()
+        self.assertIsNotNone(self.connector.connector.most_recent_error)
+        self.assertEqual(self.connector.connector.latest_error, "normal length message")
+
+    def test_update_connector_status_long(self):
+        """make sure we save errors correctly"""
+        self.assertIsNone(self.connector.connector.most_recent_error)
+
+        message = " ".join(["abcdefghijklmnopqrstuvwxyz"] * 12)
+        update_connector_status(self.connector.connector.id, message)
+
+        self.connector.connector.refresh_from_db()
+        self.assertIsNotNone(self.connector.connector.most_recent_error)
+        self.assertEqual(self.connector.connector.latest_error, message[:255])

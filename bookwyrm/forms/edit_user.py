@@ -25,6 +25,7 @@ class EditUserForm(CustomForm):
             "newsletter_subscription",
             "default_post_to_feed",
             "manually_approves_followers",
+            "is_profile_private",
             "default_post_privacy",
             "discoverable",
             "hide_follows",

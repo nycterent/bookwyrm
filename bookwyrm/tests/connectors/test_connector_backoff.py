@@ -1,15 +1,32 @@
 """Tests for Connector Health Backoff System"""
-import json
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
 
-from django.test import TestCase
+import json
+from datetime import datetime
+
+from django.test import TestCase, override_settings
 from django.core.cache import cache
 
-from bookwyrm.connectors.connector_backoff import ConnectorBackoff, sync_connector_health
+from bookwyrm.connectors.connector_backoff import (
+    ConnectorBackoff,
+    sync_connector_health,
+)
 from bookwyrm import models
 
 
+# these tests exercise cache-backed state, so they need a real cache rather
+# than the dummy cache the test settings default to
+LOCMEM_CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "file_resubmit": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "/tmp/file_resubmit_tests/",
+    },
+}
+
+
+@override_settings(CACHES=LOCMEM_CACHES)
 class TestConnectorBackoff(TestCase):
     """Test the ConnectorBackoff class"""
 
@@ -148,6 +165,10 @@ class TestConnectorBackoff(TestCase):
         for _ in range(4):
             ConnectorBackoff.record_failure(self.connector_id, "error")
 
+        # being in backoff also reports unavailable, so clear that state to
+        # isolate the success-rate threshold this test covers
+        cache.delete(ConnectorBackoff._get_cache_key(self.connector_id))
+
         stats = ConnectorBackoff.get_health_stats(self.connector_id)
         # 7/11 = 63.6% < 70% = degraded
         self.assertEqual(stats["health_status"], "degraded")
@@ -187,6 +208,7 @@ class TestConnectorBackoff(TestCase):
         self.assertEqual(stats["failure_count"], 0)
 
 
+@override_settings(CACHES=LOCMEM_CACHES)
 class TestSyncConnectorHealth(TestCase):
     """Test the Celery task for syncing health"""
 
@@ -239,4 +261,6 @@ class TestSyncConnectorHealth(TestCase):
         self.connector.refresh_from_db()
 
         # Check health status was updated
-        self.assertIn(self.connector.health_status, ["healthy", "degraded", "unavailable"])
+        self.assertIn(
+            self.connector.health_status, ["healthy", "degraded", "unavailable"]
+        )

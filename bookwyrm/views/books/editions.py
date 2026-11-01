@@ -1,13 +1,9 @@
 """the good stuff! the books!"""
 
-from functools import reduce
-import operator
-
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache as django_cache
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Q
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.views import View
@@ -17,16 +13,23 @@ from django.views.decorators.vary import vary_on_headers
 from bookwyrm import forms, models
 from bookwyrm.activitypub import ActivitypubResponse
 from bookwyrm.settings import PAGE_LENGTH
-from bookwyrm.views.helpers import is_api_request, get_mergeable_object_or_404
+from bookwyrm.views.mixins import MergeableViewMixin
+from bookwyrm.views.helpers import (
+    is_api_request,
+    get_mergeable_object_or_404,
+    search_within_queryset,
+)
 
 
-class Editions(View):
-    """list of editions"""
+class Editions(MergeableViewMixin, View):
+    """list of editions/also the work page"""
+
+    merge_model = models.Work
 
     @vary_on_headers("Accept")
-    def get(self, request, book_id):
+    def get(self, request, mergeable_object_id):
         """list of editions of a book"""
-        work = get_mergeable_object_or_404(models.Work, id=book_id)
+        work = get_mergeable_object_or_404(models.Work, id=mergeable_object_id)
 
         if is_api_request(request):
             return ActivitypubResponse(work.to_edition_list(**request.GET))
@@ -42,24 +45,22 @@ class Editions(View):
 
         editions = editions.filter(**filters)
 
-        query = request.GET.get("q")
-        if query:
-            searchable_array_fields = ["languages", "publishers"]
-            searchable_fields = [
-                "title",
-                "physical_format",
-                "isbn_10",
-                "isbn_13",
-                "oclc_number",
-                "asin",
-                "aasin",
-                "isfdb",
-            ]
-            search_filter_entries = [
-                {f"{f}__icontains": query} for f in searchable_fields
-            ] + [{f"{f}__iexact": query} for f in searchable_array_fields]
-            editions = editions.filter(
-                reduce(operator.or_, (Q(**f) for f in search_filter_entries))
+        if query := request.GET.get("q"):
+            editions = search_within_queryset(
+                editions,
+                query,
+                searchable_fields=[
+                    "title",
+                    "publishers",
+                    "languages",
+                    "physical_format",
+                    "isbn_10",
+                    "isbn_13",
+                    "oclc_number",
+                    "asin",
+                    "aasin",
+                    "isfdb",
+                ],
             )
 
         paginated = Paginator(editions, PAGE_LENGTH)
